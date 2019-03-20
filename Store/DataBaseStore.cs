@@ -34,6 +34,11 @@ namespace Birko.Data.Store
             Connector?.DoInit();
         }
 
+        public void Destroy()
+        {
+            Connector?.DropTable(typeof(T));
+        }
+
         public void Delete(T data)
         {
             if (data != null && data.Guid != null && !_deleteList.ContainsKey(data.Guid.Value))
