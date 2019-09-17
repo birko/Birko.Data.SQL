@@ -9,16 +9,8 @@
     <Import_RootNamespace>Birko.Data.DataBase</Import_RootNamespace>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="$(MSBuildThisFileDirectory)Attribute\AggregateField.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Attribute\AvgField.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Attribute\CountField.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Attribute\Field.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Attribute\MaxField.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Attribute\MinField.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Attribute\SumField.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Attribute\Table.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Attribute\View.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Attribute\ViewField.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Condition\Condition.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Condition\Join.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Connector\AbstractConnector.cs" />
@@ -30,13 +22,10 @@
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Connector\AbstractConnector_Insert.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Connector\AbstractConnector_Select.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Connector\AbstractConnector_SelectCount.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)SQL\Connector\AbstractConnector_SelectView.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)SQL\Connector\AbstractConnector_SelectViewCount.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Connector\AbstractConnector_Update.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\DataBase.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\DataBase_Field.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\DataBase_Table.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)SQL\DataBase_View.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Field\AbstractField.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Field\BooleanField.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Field\DateTimeField.cs" />
