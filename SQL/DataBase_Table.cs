@@ -1,4 +1,4 @@
-﻿using Birko.Data.SQL.Field;
+﻿using Birko.Data.SQL.Fields;
 using System;
 using System.Collections.Generic;
 using System.Data.Common;
@@ -11,13 +11,13 @@ namespace Birko.Data.SQL
 {
     public static partial class DataBase
     {
-        private static Dictionary<Type, Table.Table> _tableCache = null;
+        private static Dictionary<Type, Tables.Table> _tableCache = null;
 
-        public static IEnumerable<Table.Table> LoadTables(IEnumerable<Type> types)
+        public static IEnumerable<Tables.Table> LoadTables(IEnumerable<Type> types)
         {
             if (types != null && types.Any())
             {
-                List<Table.Table> tables = new List<Table.Table>();
+                List<Tables.Table> tables = new List<Tables.Table>();
                 foreach (Type type in types)
                 {
                     var table = LoadTable(type);
@@ -34,20 +34,20 @@ namespace Birko.Data.SQL
             }
         }
 
-        public static Table.Table LoadTable(Type type)
+        public static Tables.Table LoadTable(Type type)
         {
             if (_tableCache == null)
             {
-                _tableCache = new Dictionary<Type, Table.Table>();
+                _tableCache = new Dictionary<Type, Tables.Table>();
             }
             if (!_tableCache.ContainsKey(type))
             {
-                object[] attrs = type.GetCustomAttributes(typeof(Attribute.Table), true);
+                object[] attrs = type.GetCustomAttributes(typeof(Attributes.Table), true);
                 if (attrs != null)
                 {
-                    foreach (Attribute.Table attr in attrs)
+                    foreach (Attributes.Table attr in attrs)
                     {
-                        Table.Table table = new Table.Table()
+                        Tables.Table table = new Tables.Table()
                         {
                             Name = attr.Name,
                             Type = type,
@@ -76,13 +76,13 @@ namespace Birko.Data.SQL
         public static int Read(DbDataReader reader, object data, int index = 0)
         {
             var type = data.GetType();
-            List<Field.AbstractField> tableFields = new List<Field.AbstractField>();
+            List<Fields.AbstractField> tableFields = new List<Fields.AbstractField>();
             foreach (var field in type.GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
             {
-                object[] fieldAttrs = field.GetCustomAttributes(typeof(Attribute.Field), true);
+                object[] fieldAttrs = field.GetCustomAttributes(typeof(Attributes.Field), true);
                 if (fieldAttrs != null)
                 {
-                    foreach (Attribute.Field fieldAttr in fieldAttrs)
+                    foreach (Attributes.Field fieldAttr in fieldAttrs)
                     {
                         // from cache
                         if (_fieldsCache.ContainsKey(type) && _fieldsCache[type].Any(x => x.Property.Name == field.Name))
@@ -91,7 +91,7 @@ namespace Birko.Data.SQL
                         }
                         else
                         {
-                            tableFields.Add(Field.AbstractField.CreateAbstractField(field, fieldAttr));
+                            tableFields.Add(Fields.AbstractField.CreateAbstractField(field, fieldAttr));
                         }
                     }
                 }
@@ -102,15 +102,15 @@ namespace Birko.Data.SQL
         public static Dictionary<string, object> Write(object data)
         {
             var type = data.GetType();
-            List<Field.AbstractField> tableFields = new List<Field.AbstractField>();
+            List<Fields.AbstractField> tableFields = new List<Fields.AbstractField>();
             foreach (var field in type.GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
             {
-                object[] fieldAttrs = field.GetCustomAttributes(typeof(Attribute.Field), true);
+                object[] fieldAttrs = field.GetCustomAttributes(typeof(Attributes.Field), true);
                 if (fieldAttrs != null)
                 {
-                    foreach (Attribute.Field fieldAttr in fieldAttrs)
+                    foreach (Attributes.Field fieldAttr in fieldAttrs)
                     {
-                        tableFields.Add(Field.AbstractField.CreateAbstractField(field, fieldAttr));
+                        tableFields.Add(Fields.AbstractField.CreateAbstractField(field, fieldAttr));
                     }
                 }
             }

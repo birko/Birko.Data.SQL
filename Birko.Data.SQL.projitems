@@ -9,38 +9,37 @@
     <Import_RootNamespace>Birko.Data.DataBase</Import_RootNamespace>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="$(MSBuildThisFileDirectory)Attribute\Field.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Attribute\Table.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)SQL\Condition\Condition.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)SQL\Condition\Join.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)SQL\Connector\AbstractConnector.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)SQL\Connector\AbstractConnector_Alter_Add.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)SQL\Connector\AbstractConnector_Alter_Drop.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)SQL\Connector\AbstractConnector_Create.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)SQL\Connector\AbstractConnector_Delete.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)SQL\Connector\AbstractConnector_Drop.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)SQL\Connector\AbstractConnector_Insert.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)SQL\Connector\AbstractConnector_Select.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)SQL\Connector\AbstractConnector_SelectCount.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)SQL\Connector\AbstractConnector_Update.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Attributes\Field.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Attributes\Table.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Conditions\Condition.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Conditions\Join.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\AbstractConnector.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\AbstractConnector_Alter_Add.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\AbstractConnector_Alter_Drop.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\AbstractConnector_Create.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\AbstractConnector_Delete.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\AbstractConnector_Drop.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\AbstractConnector_Insert.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\AbstractConnector_Select.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\AbstractConnector_SelectCount.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\AbstractConnector_Update.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\DataBase.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\DataBase_Field.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\DataBase_Table.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)SQL\Field\AbstractField.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)SQL\Field\BooleanField.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)SQL\Field\DateTimeField.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)SQL\Field\DecimalField.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)SQL\Field\FunctionField.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)SQL\Field\GuidField.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)SQL\Field\IntegerField.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)SQL\Field\StringField.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)SQL\Table\Table.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)SQL\Table\View.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Fields\AbstractField.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Fields\BooleanField.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Fields\DateTimeField.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Fields\DecimalField.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Fields\FunctionField.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Fields\GuidField.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Fields\IntegerField.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Fields\StringField.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Tables\Table.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Exceptions\FieldAttributeException.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Exceptions\TableAttributeException.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Model\AbstractLogModel.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Model\AbstractModel.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Repository\DataBaseRepository.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Store\DataBaseStore.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Models\AbstractLogModel.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Models\AbstractModel.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Repositories\DataBaseRepository.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Stores\DataBaseStore.cs" />
   </ItemGroup>
 </Project>

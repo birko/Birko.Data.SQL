@@ -1,7 +1,7 @@
-﻿using Birko.Data.SQL.Condition;
-using Birko.Data.SQL.Connector;
-using Birko.Data.SQL.Field;
-using Birko.Data.Model;
+﻿using Birko.Data.SQL.Conditions;
+using Birko.Data.SQL.Connectors;
+using Birko.Data.SQL.Fields;
+using Birko.Data.Models;
 using System;
 using System.Collections.Generic;
 using System.Data.Common;
@@ -16,7 +16,7 @@ namespace Birko.Data.SQL
     {
         private static Dictionary<Type, Dictionary<string, AbstractConnector>> _connectors = null;
 
-        public static AbstractConnector GetConnector<T>(Store.Settings settings) where T: AbstractConnector
+        public static AbstractConnector GetConnector<T>(Stores.Settings settings) where T: AbstractConnector
         {
             if (_connectors == null)
             {
@@ -44,9 +44,9 @@ namespace Birko.Data.SQL
             return query;
         }
 
-        public static Condition.Condition CreateCondition(AbstractField field, object value)
+        public static Conditions.Condition CreateCondition(AbstractField field, object value)
         {
-            return new Condition.Condition(field.Name, new[] { field.Property.GetValue(value, null) });
+            return new Conditions.Condition(field.Name, new[] { field.Property.GetValue(value, null) });
         }
 
         public static string ParseExpression(Expression expr, IDictionary<string, object> parameters, bool withTableName = false, Type exprType = null)
@@ -200,7 +200,7 @@ namespace Birko.Data.SQL
             return null;
         }
 
-        public static IEnumerable<Condition.Condition> ParseConditionExpression(Expression expr, Condition.Condition parent = null, Type exprType = null)
+        public static IEnumerable<Conditions.Condition> ParseConditionExpression(Expression expr, Conditions.Condition parent = null, Type exprType = null)
         {
             if (expr != null)
             {
@@ -220,7 +220,7 @@ namespace Birko.Data.SQL
                         return new [] { parent };
                     }
                 }
-                var basecondition = new Condition.Condition(null, null);
+                var basecondition = new Conditions.Condition(null, null);
                 if (expr is BinaryExpression binaryExpression)
                 {
                     switch (expr.NodeType)
@@ -257,7 +257,7 @@ namespace Birko.Data.SQL
                     var right = ParseConditionExpression(binaryExpression.Right, basecondition, exprType);
                     if (parent != null)
                     {
-                        parent.SubConditions = (parent.SubConditions ?? (new Condition.Condition[0])).Union(new[] { basecondition }).AsEnumerable();
+                        parent.SubConditions = (parent.SubConditions ?? (new Conditions.Condition[0])).Union(new[] { basecondition }).AsEnumerable();
                         return new[] { parent };
                     }
                     else
@@ -377,7 +377,7 @@ namespace Birko.Data.SQL
                     }
                 }
             }
-            return new Condition.Condition[0];
+            return new Conditions.Condition[0];
         }
 
         private static List<object> InvokeExpression(Expression expr)

@@ -1,4 +1,4 @@
-﻿using Birko.Data.SQL.Field;
+﻿using Birko.Data.SQL.Fields;
 using System;
 using System.Collections.Generic;
 using System.Data.Common;
@@ -11,13 +11,13 @@ namespace Birko.Data.SQL
 {
     public static partial class DataBase
     {
-        private static Dictionary<Type, IEnumerable<Field.AbstractField>> _fieldsCache = null;
+        private static Dictionary<Type, IEnumerable<Fields.AbstractField>> _fieldsCache = null;
 
         private static IEnumerable<AbstractField> LoadFields(Type type)
         {
             if (_fieldsCache == null)
             {
-                _fieldsCache = new Dictionary<Type, IEnumerable<Field.AbstractField>>();
+                _fieldsCache = new Dictionary<Type, IEnumerable<Fields.AbstractField>>();
             }
             if (!_fieldsCache.ContainsKey(type))
             {
@@ -34,12 +34,12 @@ namespace Birko.Data.SQL
         public static IEnumerable<AbstractField> LoadField(PropertyInfo field)
         {
             List<AbstractField> list = new List<AbstractField>();
-            object[] fieldAttrs = field.GetCustomAttributes(typeof(Attribute.Field), true);
+            object[] fieldAttrs = field.GetCustomAttributes(typeof(Attributes.Field), true);
             if (fieldAttrs != null)
             {
-                foreach (Attribute.Field fieldAttr in fieldAttrs)
+                foreach (Attributes.Field fieldAttr in fieldAttrs)
                 {
-                    var tableField = Field.AbstractField.CreateAbstractField(field, fieldAttr);
+                    var tableField = Fields.AbstractField.CreateAbstractField(field, fieldAttr);
 
                     if (tableField != null)
                     {
@@ -65,13 +65,13 @@ namespace Birko.Data.SQL
             {
                 propInfo = memberExpression.Member as PropertyInfo;
             }
-            if (propInfo.ReflectedType == typeof(Model.AbstractLogModel))
+            if (propInfo.ReflectedType == typeof(Models.AbstractLogModel))
             {
-                propInfo = typeof(Model.AbstractDatabaseLogModel).GetProperty(propInfo.Name);
+                propInfo = typeof(Models.AbstractDatabaseLogModel).GetProperty(propInfo.Name);
             }
-            else if (propInfo.ReflectedType == typeof(Model.AbstractModel))
+            else if (propInfo.ReflectedType == typeof(Models.AbstractModel))
             {
-                propInfo = typeof(Model.AbstractDatabaseModel).GetProperty(propInfo.Name);
+                propInfo = typeof(Models.AbstractDatabaseModel).GetProperty(propInfo.Name);
             }
             var fields = LoadField(propInfo);
             return fields.First();
@@ -83,7 +83,7 @@ namespace Birko.Data.SQL
             return table?.GetPrimaryFields() ?? new AbstractField[0];
         }
 
-        public static int Read(IEnumerable<Field.AbstractField> fields, DbDataReader reader, object data, int index = 0)
+        public static int Read(IEnumerable<Fields.AbstractField> fields, DbDataReader reader, object data, int index = 0)
         {
             if (fields != null)
             {
@@ -96,7 +96,7 @@ namespace Birko.Data.SQL
             return index;
         }
 
-        public static Dictionary<string, object> Write(IEnumerable<Field.AbstractField> fields, object data)
+        public static Dictionary<string, object> Write(IEnumerable<Fields.AbstractField> fields, object data)
         {
             Dictionary<string, object> result = new Dictionary<string, object>();
             if (fields != null)
