@@ -30,9 +30,9 @@
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Fields\BooleanField.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Fields\DateTimeField.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Fields\DecimalField.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)SQL\Fields\FunctionField.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Fields\GuidField.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Fields\IntegerField.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Fields\CharField.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Fields\StringField.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Tables\Table.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Exceptions\FieldAttributeException.cs" />

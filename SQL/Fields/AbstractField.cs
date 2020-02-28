@@ -120,9 +120,21 @@ namespace Birko.Data.SQL.Fields
                         ? (AbstractField)new IntegerField(property, name, primary, unique, autoincrement)
                         : (AbstractField)new NullableIntegerField(property, name, primary, unique, autoincrement);
             }
+            if (property.PropertyType == typeof(char))
+            {
+                return new CharField(property, name, primary, unique, 1);
+            }
+
             if (property.PropertyType == typeof(string))
             {
-                return new StringField(property, name, primary, unique);
+                if (precision != null && precision > 0)
+                {
+                    return new CharField(property, name, primary, unique, precision);
+                }
+                else
+                {
+                    return new StringField(property, name, primary, unique);
+                }
             }
 
             throw new Exceptions.FieldAttributeException("No field attributes in type");
