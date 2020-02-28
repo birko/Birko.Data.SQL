@@ -56,52 +56,76 @@ namespace Birko.Data.SQL.Fields
             return false; // value-type
         }
 
-        public static AbstractField CreateAbstractField(System.Reflection.PropertyInfo property, Attributes.Field field)
+        public static AbstractField CreateAbstractField(System.Reflection.PropertyInfo property, Attributes.Field[] fields = null)
         {
-            string name = !string.IsNullOrEmpty(field.Name) ? field.Name : property.Name;
             var isNullable = IsNullable(property.PropertyType);
+            string name = property.Name;
+            bool primary = false;
+            bool unique = false;
+            bool autoincrement = false;
+            int? scale = null;
+            int? precision = null;
 
-            if (field is Attributes.BooleanField)
+            if (fields != null && fields.Any())
+            {
+                foreach (var field in fields.Where(x => x != null))
+                {
+                    name = !string.IsNullOrEmpty(field.Name) ? field.Name : name;
+                    primary = field.Primary;
+                    unique = field.Unique;
+                    if (field is Attributes.NumberField numberField)
+                    {
+                        autoincrement = numberField.AutoIncrement;
+                    }
+                    if (field is Attributes.PrecisionField precisionField)
+                    {
+                        precision = precisionField.Precision;
+                    }
+                    if (field is Attributes.ScaleField scaleField)
+                    {
+                        scale = scaleField.Scale;
+                    }
+                }
+
+            }
+
+            if (property.PropertyType == typeof(bool) || property.PropertyType == typeof(bool?))
             {
                 return (!isNullable)
-                        ? (AbstractField)new BooleanField(property, name, field.Primary, field.Unique)
-                        : (AbstractField)new NullableBooleanField(property, name, field.Primary, field.Unique);
+                        ? (AbstractField)new BooleanField(property, name, primary, unique)
+                        : (AbstractField)new NullableBooleanField(property, name, primary, unique);
             }
-            if (field is Attributes.DateTimeField)
+            if (property.PropertyType == typeof(DateTime) || property.PropertyType == typeof(DateTime?))
             {
                 return (!isNullable)
-                        ? (AbstractField)new DateTimeField(property, name, field.Primary, field.Unique)
-                        : (AbstractField)new NullableDateTimeField(property, name, field.Primary, field.Unique);
+                        ? (AbstractField)new DateTimeField(property, name, primary, unique)
+                        : (AbstractField)new NullableDateTimeField(property, name, primary, unique);
             }
-            if (field is Attributes.NumericField numericField)
+
+            if (property.PropertyType == typeof(decimal) || property.PropertyType == typeof(decimal?))
             {
                 return (!isNullable)
-                        ? (AbstractField)new DecimalField(property, name, field.Primary, field.Unique, field.AutoIncrement, numericField.Precision, numericField.Scale)
-                        : (AbstractField)new NullableDecimalField(property, name, field.Primary, field.Unique, field.AutoIncrement, numericField.Precision, numericField.Scale);
+                        ? (AbstractField)new DecimalField(property, name, primary, unique, autoincrement, precision, scale)
+                        : (AbstractField)new NullableDecimalField(property, name, primary, unique, autoincrement, precision, scale);
             }
-            if (field is Attributes.DecimalField)
+            if (property.PropertyType == typeof(Guid) || property.PropertyType == typeof(Guid?))
             {
                 return (!isNullable)
-                        ? (AbstractField)new DecimalField(property, name, field.Primary, field.Unique, field.AutoIncrement)
-                        : (AbstractField)new NullableDecimalField(property, name, field.Primary, field.Unique, field.AutoIncrement);
+                        ? (AbstractField)new GuidField(property, name, primary, unique)
+                        : (AbstractField)new NullableGuidField(property, name, primary, unique);
             }
-            if (field is Attributes.GuidField)
+            if(property.PropertyType == typeof(int) || property.PropertyType == typeof(int?))
             {
                 return (!isNullable)
-                        ? (AbstractField)new GuidField(property, name, field.Primary, field.Unique)
-                        : (AbstractField)new NullableGuidField(property, name, field.Primary, field.Unique);
+                        ? (AbstractField)new IntegerField(property, name, primary, unique, autoincrement)
+                        : (AbstractField)new NullableIntegerField(property, name, primary, unique, autoincrement);
             }
-            if(field is Attributes.IntegerField)
+            if (property.PropertyType == typeof(string))
             {
-                return (!isNullable)
-                        ? (AbstractField)new IntegerField(property, name, field.Primary, field.Unique, field.AutoIncrement)
-                        : (AbstractField)new NullableIntegerField(property, name, field.Primary, field.Unique, field.AutoIncrement);
+                return new StringField(property, name, primary, unique);
             }
-            if (field is Attributes.StringField)
-            {
-                return new StringField(property, name, field.Primary, field.Unique);
-            }
-            return null;
+
+            throw new Exceptions.FieldAttributeException("No field attributes in type");
         }
     }
 }

@@ -8,7 +8,7 @@ namespace Birko.Data.Models
 {
     public abstract partial class AbstractDatabaseModel : AbstractModel
     {
-        [GuidField(null, true, true)]
+        [Field(null, true, true)]
         public override Guid? Guid { get; set; } = null;
     }
 }

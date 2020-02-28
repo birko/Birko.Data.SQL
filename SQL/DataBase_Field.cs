@@ -22,10 +22,10 @@ namespace Birko.Data.SQL
             if (!_fieldsCache.ContainsKey(type))
             {
                 List<AbstractField> list = new List<AbstractField>();
-                foreach (var field in type.GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
+                GetProperties(type, (field) =>
                 {
                     list.AddRange(LoadField(field));
-                }
+                });
                 _fieldsCache.Add(type, list.ToArray());
             }
             return _fieldsCache[type];
@@ -34,22 +34,11 @@ namespace Birko.Data.SQL
         public static IEnumerable<AbstractField> LoadField(PropertyInfo field)
         {
             List<AbstractField> list = new List<AbstractField>();
-            object[] fieldAttrs = field.GetCustomAttributes(typeof(Attributes.Field), true);
-            if (fieldAttrs != null)
+            Attributes.Field[] fieldAttrs = (Attributes.Field[])field.GetCustomAttributes(typeof(Attributes.Field), true);
+            var tableField = Fields.AbstractField.CreateAbstractField(field, fieldAttrs);
+            if (tableField != null)
             {
-                foreach (Attributes.Field fieldAttr in fieldAttrs)
-                {
-                    var tableField = Fields.AbstractField.CreateAbstractField(field, fieldAttr);
-
-                    if (tableField != null)
-                    {
-                        list.Add(tableField);
-                    }
-                }
-            }
-            else
-            {
-                throw new Exceptions.FieldAttributeException("No field attributes in type");
+                list.Add(tableField);
             }
             return list.ToArray();
         }

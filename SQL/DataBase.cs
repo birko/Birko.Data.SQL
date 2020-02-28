@@ -33,6 +33,18 @@ namespace Birko.Data.SQL
             return _connectors[typeof(T)][settings.GetId()];
         }
 
+        private static void GetProperties(Type type, Action<PropertyInfo> action)
+        {
+            foreach (var field in type.GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
+            {
+                var accesors = field.GetAccessors();
+                if (accesors.Any(x => !x.IsStatic))
+                {
+                    action?.Invoke(field);
+                }
+            }
+        }
+
         public static string GetGeneratedQuery(DbCommand dbCommand)
         {
             var query = dbCommand.CommandText;

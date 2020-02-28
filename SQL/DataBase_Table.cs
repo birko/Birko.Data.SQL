@@ -73,29 +73,28 @@ namespace Birko.Data.SQL
             return _tableCache[type];
         }
 
+
+
         public static int Read(DbDataReader reader, object data, int index = 0)
         {
             var type = data.GetType();
             List<Fields.AbstractField> tableFields = new List<Fields.AbstractField>();
-            foreach (var field in type.GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
+            GetProperties(type, (field) =>
             {
-                object[] fieldAttrs = field.GetCustomAttributes(typeof(Attributes.Field), true);
+                Attributes.Field[] fieldAttrs = (Attributes.Field[])field.GetCustomAttributes(typeof(Attributes.Field), true);
                 if (fieldAttrs != null)
                 {
-                    foreach (Attributes.Field fieldAttr in fieldAttrs)
+                    // from cache
+                    if (_fieldsCache.ContainsKey(type) && _fieldsCache[type].Any(x => x.Property.Name == field.Name))
                     {
-                        // from cache
-                        if (_fieldsCache.ContainsKey(type) && _fieldsCache[type].Any(x => x.Property.Name == field.Name))
-                        {
-                            tableFields.Add(_fieldsCache[type].FirstOrDefault(x => x.Property.Name == field.Name));
-                        }
-                        else
-                        {
-                            tableFields.Add(Fields.AbstractField.CreateAbstractField(field, fieldAttr));
-                        }
+                        tableFields.Add(_fieldsCache[type].FirstOrDefault(x => x.Property.Name == field.Name));
+                    }
+                    else
+                    {
+                        tableFields.Add(Fields.AbstractField.CreateAbstractField(field, fieldAttrs));
                     }
                 }
-            }
+            });
             return Read(tableFields, reader, data, index);
         }
 
@@ -103,17 +102,11 @@ namespace Birko.Data.SQL
         {
             var type = data.GetType();
             List<Fields.AbstractField> tableFields = new List<Fields.AbstractField>();
-            foreach (var field in type.GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
+            GetProperties(type, (field) =>
             {
-                object[] fieldAttrs = field.GetCustomAttributes(typeof(Attributes.Field), true);
-                if (fieldAttrs != null)
-                {
-                    foreach (Attributes.Field fieldAttr in fieldAttrs)
-                    {
-                        tableFields.Add(Fields.AbstractField.CreateAbstractField(field, fieldAttr));
-                    }
-                }
-            }
+                Attributes.Field[] fieldAttrs = (Attributes.Field[])field.GetCustomAttributes(typeof(Attributes.Field), true);
+                tableFields.Add(Fields.AbstractField.CreateAbstractField(field, fieldAttrs));
+            });
             return Write(tableFields, data);
         }
     }
