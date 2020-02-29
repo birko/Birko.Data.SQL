@@ -11,13 +11,9 @@ namespace Birko.Data.Repositories
         where TModel : Models.AbstractModel, Models.ILoadable<TViewModel>
         where TViewModel : Models.ILoadable<TModel>
     {
-        public DataBaseRepository(string path, string name, SQL.Connectors.InitConnector onInit = null): base (path)
+        public DataBaseRepository(Stores.PasswordSettings settings, SQL.Connectors.InitConnector onInit = null): base (settings)
         {
-            _store = new Stores.DataBaseStore<TConnector, TModel>(new Stores.PasswordSettings()
-            {
-                Location = path,
-                Name = name
-            }, onInit);
+            _store = new Stores.DataBaseStore<TConnector, TModel>(settings, onInit);
         }
 
         public override void Read(Action<TViewModel> readAction)
@@ -65,7 +61,6 @@ namespace Birko.Data.Repositories
                 TViewModel result = default(TViewModel);
                 Read(expr, (item) =>
                 {
-                    result = (TViewModel)Activator.CreateInstance(typeof(TViewModel), new object[] { });
                     result = item;
                 }, orderByExpr);
                 return result;
