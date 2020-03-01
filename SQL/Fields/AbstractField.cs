@@ -70,12 +70,22 @@ namespace Birko.Data.SQL.Fields
             {
                 foreach (var field in fields.Where(x => x != null))
                 {
-                    name = !string.IsNullOrEmpty(field.Name) ? field.Name : name;
-                    primary = field.Primary;
-                    unique = field.Unique;
-                    if (field is Attributes.NumberField numberField)
+                    if (field is Attributes.NamedField namedfield)
                     {
-                        autoincrement = numberField.AutoIncrement;
+                        name = !string.IsNullOrEmpty(namedfield.Name) ? namedfield.Name : name;
+                    }
+
+                    if (field is Attributes.PrimaryField)
+                    {
+                        primary = true;
+                    }
+                    if (field is Attributes.UniqueField)
+                    {
+                        unique = true;
+                    }
+                    if (field is Attributes.IncrementField)
+                    {
+                        autoincrement = true;
                     }
                     if (field is Attributes.PrecisionField precisionField)
                     {

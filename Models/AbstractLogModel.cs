@@ -9,7 +9,8 @@ namespace Birko.Data.Models
     public abstract class AbstractDatabaseLogModel : AbstractLogModel
     {
         //overide from AbstractModel
-        [Field(null, true, true)]
+        [UniqueField]
+        [PrimaryField]
         public override Guid? Guid { get; set; } = null;
 
         //override from  AbstractLogModel
