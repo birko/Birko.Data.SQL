@@ -298,6 +298,7 @@ namespace Birko.Data.SQL.Connectors
                     {
                         using (var command = db.CreateCommand())
                         {
+                            command.Transaction = transaction;
                             createCommand?.Invoke(command);
                             commandText = DataBase.GetGeneratedQuery(command);
                             executeCommand?.Invoke(command);

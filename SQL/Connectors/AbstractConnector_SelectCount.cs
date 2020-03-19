@@ -76,7 +76,7 @@ namespace Birko.Data.SQL.Connectors
                 }, (command) =>
                 {
                     var data = command.ExecuteScalar();
-                    count = (long)command.ExecuteScalar();
+                    count = Convert.ToInt64(command.ExecuteScalar());
                 });
             }
             return count;

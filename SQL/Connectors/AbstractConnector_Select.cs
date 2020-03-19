@@ -192,14 +192,29 @@ namespace Birko.Data.SQL.Connectors
                 DoCommand((command) => {
                     command = CreateSelectCommand(command, tableNames.Where(x => !string.IsNullOrEmpty(x)).Distinct(), fields, conditions, orderFields);
                 }, (command) => {
-                    var reader = command.ExecuteReader();
-                    if (reader.HasRows)
+                    using (var reader = command.ExecuteReader())
                     {
-                        bool isNext = reader.Read();
-                        while (isNext)
+                        try
                         {
-                            readAction?.Invoke(fields, reader);
-                            isNext = reader.Read();
+
+                            if (reader.HasRows)
+                            {
+                                bool isNext = reader.Read();
+                                while (isNext)
+                                {
+                                    readAction?.Invoke(fields, reader);
+                                    isNext = reader.Read();
+                                }
+                            }
+                            reader.Close();
+                        }
+                        catch (Exception ex)
+                        {
+                            throw ex;
+                        }
+                        finally
+                        {
+                            reader.Close();
                         }
                     }
                 });

@@ -8,7 +8,7 @@ using Birko.Data.SQL.Connectors;
 namespace Birko.Data.Stores
 {
 
-    public class DataBaseStore<DB, T> : AbstractStore<T, PasswordSettings>
+    public class DataBaseStore<DB, T> : AbstractStore<T>
         where T : Models.AbstractModel
         where DB : AbstractConnector
     {
@@ -23,7 +23,7 @@ namespace Birko.Data.Stores
 
         }
 
-        public override void SetSettings(PasswordSettings settings)
+        public override void SetSettings(ISettings settings)
         {
             if (settings is PasswordSettings sets)
             {

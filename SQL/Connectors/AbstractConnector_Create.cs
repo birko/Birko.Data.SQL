@@ -44,17 +44,24 @@ namespace Birko.Data.SQL.Connectors
             {
                 foreach (var kvp in tables.Where(x => x.Value != null && x.Value.Any()))
                 {
-                    DoCommand((command) => {
-                        command.CommandText = "CREATE TABLE IF NOT EXISTS "
-                            + kvp.Key
-                            + " ("
-                            + string.Join(", ", kvp.Value.Select(x => FieldDefinition(x)).Where(x => !string.IsNullOrEmpty(x)))
-                            + ")";
-                    }, (command) => {
-                        command.ExecuteNonQuery();
-                    }, true);
+                    CreateTable(kvp.Key, kvp.Value.Select(x => FieldDefinition(x)));
                 }
             }
+        }
+
+        public virtual void CreateTable(string name, IEnumerable<string> fields)
+        {
+            DoCommand((command) =>
+            {
+                command.CommandText = "CREATE TABLE IF NOT EXISTS "
+                    + name
+                    + " ("
+                    + string.Join(", ", fields.Where(x => !string.IsNullOrEmpty(x)))
+                    + ")";
+            }, (command) =>
+            {
+                command.ExecuteNonQuery();
+            }, true);
         }
     }
 }

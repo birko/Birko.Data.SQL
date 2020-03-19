@@ -6,34 +6,31 @@ using System.Text;
 
 namespace Birko.Data.Repositories
 {
-    public abstract class DataBaseRepository<TConnector, TViewModel, TModel> : AbstractRepository<TViewModel, TModel, Stores.PasswordSettings>
+    public abstract class DataBaseRepository<TConnector, TViewModel, TModel> : AbstractRepository<TViewModel, TModel>
         where TConnector : SQL.Connectors.AbstractConnector
         where TModel : Models.AbstractModel, Models.ILoadable<TViewModel>
         where TViewModel : Models.ILoadable<TModel>
     {
-        private Stores.DataBaseStore<TConnector, TModel> _store = null;
         public DataBaseRepository(): base ()
         {
         }
 
-        protected override Stores.IStore<TModel, Stores.PasswordSettings> GetStore()
+        public override void SetSettings(Stores.ISettings settings)
         {
-            return _store;
-        }
-
-        public override void SetSettings(Stores.PasswordSettings settings)
-        {
-            base.SetSettings(settings);
-            _store = Stores.StoreLocator.GetStore<Stores.DataBaseStore<TConnector, TModel>, Stores.PasswordSettings>(settings);
-            AddOnInit((connector) =>
+            if (settings is Stores.PasswordSettings setts)
             {
-                connector.CreateTable(new[] { typeof(TModel) });
-            });
+                base.SetSettings(setts);
+                Store = Stores.StoreLocator.GetStore<Stores.DataBaseStore<TConnector, TModel>, Stores.ISettings>(setts);
+                AddOnInit((connector) =>
+                {
+                    connector.CreateTable(new[] { typeof(TModel) });
+                });
+            }
         }
 
         public virtual void AddOnInit(SQL.Connectors.InitConnector onInit)
         {
-            var _store = GetStore();
+            var _store = Store;
             if (_store != null && onInit != null)
             {
                 (_store as Stores.DataBaseStore<TConnector, TModel>).AddOnInit(onInit);
@@ -42,7 +39,7 @@ namespace Birko.Data.Repositories
 
         public virtual void RemoveOnInit(SQL.Connectors.InitConnector onInit)
         {
-            var _store = GetStore();
+            var _store = Store;
             if (_store != null && onInit != null)
             {
                 (_store as Stores.DataBaseStore<TConnector, TModel>).RemoveOnInit(onInit);
@@ -50,7 +47,7 @@ namespace Birko.Data.Repositories
         }
         protected SQL.Connectors.AbstractConnector GetConnector()
         {
-            var _store = GetStore();
+            var _store = Store;
             return (_store != null) ? (_store as Stores.DataBaseStore<TConnector, TModel>).Connector : null;
         }
 
@@ -76,7 +73,7 @@ namespace Birko.Data.Repositories
 
         public virtual void Read(Expression<Func<TModel, bool>> expr, Action<TViewModel> readAction, IDictionary<Expression<Func<TModel, object>>, bool> orderByExpr = null)
         {
-            var _store = GetStore();
+            var _store = Store;
             if (_store != null && readAction != null)
             {
                 var connector = GetConnector();
@@ -95,7 +92,7 @@ namespace Birko.Data.Repositories
 
         public virtual TViewModel ReadOne(Expression<Func<TModel, bool>> expr, IDictionary<Expression<Func<TModel, object>>, bool> orderByExpr = null)
         {
-            var _store = GetStore();
+            var _store = Store;
             if (_store != null)
             {
                 TViewModel result = default(TViewModel);
@@ -115,7 +112,7 @@ namespace Birko.Data.Repositories
 
         public virtual void ReadView<TView>(Expression<Func<TView, bool>> expr, Action<TView> readAction, IDictionary<Expression<Func<TModel, object>>, bool> orderByExpr = null)
         {
-            var _store = GetStore();
+            var _store = Store;
             if (_store != null && readAction != null)
             {
                 var connector = GetConnector();
@@ -129,7 +126,7 @@ namespace Birko.Data.Repositories
         //bulk update command
         public virtual void Update(IDictionary<Expression<Func<TModel, object>>, Expression<Func<TModel, object>>> expresions, Expression<Func<TModel, bool>> expr, Action<TViewModel> readAction, Expression<Func<TModel, bool>> readExpr)
         {
-            var _store = GetStore();
+            var _store = Store;
             if (_store != null)
             {
                 var connector = GetConnector();
@@ -166,7 +163,7 @@ namespace Birko.Data.Repositories
         //bulk update command
         public virtual void Update(IDictionary<Expression<Func<TModel, object>>, object> expresions, Expression<Func<TModel, bool>> expr, Action<TViewModel> readAction, Expression<Func<TModel, bool>> readExpr)
         {
-            var _store = GetStore();
+            var _store = Store;
             if (_store != null)
             {
                 var connector = GetConnector();
@@ -196,7 +193,7 @@ namespace Birko.Data.Repositories
 
         public virtual void Delete(Expression<Func<TModel, bool>> expr)
         {
-            var _store = GetStore();
+            var _store = Store;
             if (_store != null)
             {
                 GetConnector()?.Delete(typeof(TModel), expr);
