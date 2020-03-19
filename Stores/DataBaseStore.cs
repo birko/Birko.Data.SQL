@@ -7,7 +7,8 @@ using Birko.Data.SQL.Connectors;
 
 namespace Birko.Data.Stores
 {
-    class DataBaseStore<DB, T> : IStore<T>
+
+    public class DataBaseStore<DB, T> : AbstractStore<T, PasswordSettings>
         where T : Models.AbstractModel
         where DB : AbstractConnector
     {
@@ -17,29 +18,49 @@ namespace Birko.Data.Stores
 
         public AbstractConnector Connector { get; private set; }
 
-        public DataBaseStore(PasswordSettings settings, InitConnector onInit = null)
+        public DataBaseStore()
         {
-            Connector = SQL.DataBase.GetConnector<DB>(settings);
-            if (onInit != null)
+
+        }
+
+        public override void SetSettings(PasswordSettings settings)
+        {
+            if (settings is PasswordSettings sets)
+            {
+                Connector = SQL.DataBase.GetConnector<DB>(sets);
+                _insertList = new Dictionary<Guid, T>();
+                _updateList = new Dictionary<Guid, T>();
+                _deleteList = new Dictionary<Guid, T>();
+            }
+        }
+
+        public void AddOnInit(InitConnector onInit)
+        {
+            if (onInit != null && Connector != null)
             {
                 Connector.OnInit += onInit;
             }
-            _insertList = new Dictionary<Guid, T>();
-            _updateList = new Dictionary<Guid, T>();
-            _deleteList = new Dictionary<Guid, T>();
         }
 
-        public void Init()
+        public void RemoveOnInit(InitConnector onInit)
+        {
+            if (onInit != null && Connector != null)
+            {
+                Connector.OnInit -= onInit;
+            }
+        }
+
+        public override void Init()
         {
             Connector?.DoInit();
         }
 
-        public void Destroy()
+        public override void Destroy()
         {
             Connector?.DropTable(typeof(T));
         }
 
-        public void Delete(T data)
+        public override void Delete(T data)
         {
             if (data != null && data.Guid != null && !_deleteList.ContainsKey(data.Guid.Value))
             {
@@ -47,12 +68,7 @@ namespace Birko.Data.Stores
             }
         }
 
-        public void List(Action<T> action)
-        {
-            List(null, action);
-        }
-
-        public void List(Expression<Func<T, bool>> filter, Action<T> action)
+        public override void List(Expression<Func<T, bool>> filter, Action<T> action)
         {
             if (Connector != null && action != null)
             {
@@ -66,16 +82,13 @@ namespace Birko.Data.Stores
             }
         }
 
-        public long Count()
+        public override long Count()
         {
-            if (Connector != null)
-            {
-                return Connector.SelectCount(typeof(T));
-            }
-            return  0;
+
+            return Count(null);
         }
 
-        public long Count(Expression<Func<T, bool>> filter)
+        public override long Count(Expression<Func<T, bool>> filter)
         {
             if (Connector != null)
             {
@@ -84,7 +97,7 @@ namespace Birko.Data.Stores
             return 0;
         }
 
-        public void Save(T data, StoreDataDelegate<T> storeDelegate = null)
+        public override void Save(T data, StoreDataDelegate<T> storeDelegate = null)
         {
             if (data != null)
             {
@@ -128,7 +141,7 @@ namespace Birko.Data.Stores
             }
         }
 
-        public void StoreChanges()
+        public override void StoreChanges()
         {
             if (Connector != null)
             {
