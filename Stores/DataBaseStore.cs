@@ -82,12 +82,6 @@ namespace Birko.Data.Stores
             }
         }
 
-        public override long Count()
-        {
-
-            return Count(null);
-        }
-
         public override long Count(Expression<Func<T, bool>> filter)
         {
             if (Connector != null)
