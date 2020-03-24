@@ -68,7 +68,7 @@ namespace Birko.Data.Stores
             }
         }
 
-        public override void List(Expression<Func<T, bool>> filter, Action<T> action)
+        public override void List(Expression<Func<T, bool>> filter, Action<T> action, int? limit = null, int? offset = null)
         {
             if (Connector != null && action != null)
             {
@@ -78,7 +78,7 @@ namespace Birko.Data.Stores
                     {
                         action?.Invoke((T)data);
                     }
-                }, filter);
+                }, filter, null, limit, offset);
             }
         }
 

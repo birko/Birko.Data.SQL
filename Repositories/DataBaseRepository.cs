@@ -51,19 +51,19 @@ namespace Birko.Data.Repositories
             return (_store != null) ? (_store as Stores.DataBaseStore<TConnector, TModel>).Connector : null;
         }
 
-        public override void Read(Action<TViewModel> readAction)
+        public override void Read(Action<TViewModel> readAction, int? limit = null, int? offset = null)
         {
-            Read(null, readAction);
+            Read(null, readAction, limit, offset);
         }
 
-        public override void Read(Expression<Func<TModel, bool>> expr, Action<TViewModel> readAction)
+        public override void Read(Expression<Func<TModel, bool>> expr, Action<TViewModel> readAction, int? limit = null, int? offset = null)
         {
-            Read(expr, readAction, null);
+            Read(expr, readAction, null, limit, offset);
         }
 
-        public virtual void Read(Action<TViewModel> readAction, IDictionary<Expression<Func<TModel, object>>, bool> orderByExpr = null)
+        public virtual void Read(Action<TViewModel> readAction, IDictionary<Expression<Func<TModel, object>>, bool> orderByExpr = null, int? limit = null, int? offset = null)
         {
-            Read(null, readAction, orderByExpr);
+            Read(null, readAction, orderByExpr, limit, offset);
         }
 
         public override TViewModel Read(Guid Id)
@@ -71,7 +71,7 @@ namespace Birko.Data.Repositories
             return ReadOne(x => x.Guid == Id);
         }
 
-        public virtual void Read(Expression<Func<TModel, bool>> expr, Action<TViewModel> readAction, IDictionary<Expression<Func<TModel, object>>, bool> orderByExpr = null)
+        public virtual void Read(Expression<Func<TModel, bool>> expr, Action<TViewModel> readAction, IDictionary<Expression<Func<TModel, object>>, bool> orderByExpr = null, int? limit = null, int? offset = null)
         {
             var _store = Store;
             if (_store != null && readAction != null)
@@ -86,7 +86,7 @@ namespace Birko.Data.Repositories
                         StoreHash((data as TModel));
                         readAction?.Invoke(result);
                     }
-                }, expr, orderByExpr);
+                }, expr, orderByExpr, limit, offset);
             }
         }
 

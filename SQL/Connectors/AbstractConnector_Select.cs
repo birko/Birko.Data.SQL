@@ -9,12 +9,12 @@ namespace Birko.Data.SQL.Connectors
 {
     public abstract partial class AbstractConnector
     {
-        public virtual DbCommand CreateSelectCommand(DbCommand command, IEnumerable<string> tableNames, IDictionary<int, string> fields, IEnumerable<Conditions.Condition> conditions = null, IDictionary<string, bool> orderFields = null)
+        public virtual DbCommand CreateSelectCommand(DbCommand command, IEnumerable<string> tableNames, IDictionary<int, string> fields, IEnumerable<Conditions.Condition> conditions = null, IDictionary<string, bool> orderFields = null, int? limit = null, int? offset = null)
         {
-            return CreateSelectCommand(command, tableNames, fields, null, conditions, null, orderFields);
+            return CreateSelectCommand(command, tableNames, fields, null, conditions, null, orderFields, limit, offset);
         }
 
-        public virtual DbCommand CreateSelectCommand(DbCommand command, Tables.View view, IEnumerable<Conditions.Condition> conditions = null, IDictionary<string, bool> orderFields = null)
+        public virtual DbCommand CreateSelectCommand(DbCommand command, Tables.View view, IEnumerable<Conditions.Condition> conditions = null, IDictionary<string, bool> orderFields = null, int? limit = null, int? offset = null)
         {
             var leftTables = view.Join?.Select(x => x.Left).Distinct().Where(x => !string.IsNullOrEmpty(x)).ToList();
             if (leftTables != null)
@@ -24,11 +24,11 @@ namespace Birko.Data.SQL.Connectors
                     leftTables.Remove(tableName);
                 }
             }
-            return CreateSelectCommand(command, leftTables ?? view.Tables.Select(x => x.Name), view.GetSelectFields(), view.Join, conditions, view.HasAggregateFields() ? view.GetSelectFields(true) : null, orderFields);
+            return CreateSelectCommand(command, leftTables ?? view.Tables.Select(x => x.Name), view.GetSelectFields(), view.Join, conditions, view.HasAggregateFields() ? view.GetSelectFields(true) : null, orderFields, limit, offset);
         }
 
 
-        public virtual DbCommand CreateSelectCommand(DbCommand command, IEnumerable<string> tableNames, IDictionary<int, string> fields, IEnumerable<Conditions.Join> joinconditions = null, IEnumerable<Conditions.Condition> conditions = null, IDictionary<int, string> groupFields = null, IDictionary<string, bool> orderFields = null)
+        public virtual DbCommand CreateSelectCommand(DbCommand command, IEnumerable<string> tableNames, IDictionary<int, string> fields, IEnumerable<Conditions.Join> joinconditions = null, IEnumerable<Conditions.Condition> conditions = null, IDictionary<int, string> groupFields = null, IDictionary<string, bool> orderFields = null, int? limit = null, int? offset = null)
         {
             command.CommandText = "SELECT " + string.Join(", ", fields.Values) + " FROM ";
 
@@ -101,30 +101,34 @@ namespace Birko.Data.SQL.Connectors
             {
                 command.CommandText += " ORDER BY " + string.Join(", ", orderFields.Select(kvp => string.Format("{0} {1}", kvp.Key, kvp.Value ? "ASC" : "DESC")));
             }
+            if(limit != null)
+            {
+                command.CommandText += LimitOffsetDefinition(command, limit, offset);
+            }
             return command;
         }
 
-        public void Select<T, P>(Type type, Action<object> resultAction, LambdaExpression expr, IDictionary<Expression<Func<T, P>>, bool> orderFields = null)
+        public void Select<T, P>(Type type, Action<object> resultAction, LambdaExpression expr, IDictionary<Expression<Func<T, P>>, bool> orderFields = null, int? limit = null, int? offset = null)
         {
-            Select(type, resultAction, (expr != null) ? DataBase.ParseConditionExpression(expr) : null, orderFields?.ToDictionary(x => DataBase.GetField(x.Key).GetSelectName(false), x => x.Value));
+            Select(type, resultAction, (expr != null) ? DataBase.ParseConditionExpression(expr) : null, orderFields?.ToDictionary(x => DataBase.GetField(x.Key).GetSelectName(false), x => x.Value), limit, offset);
         }
 
-        public void Select(Type type, Action<object> resultAction, LambdaExpression expr, IDictionary<string, bool> orderFields = null)
+        public void Select(Type type, Action<object> resultAction, LambdaExpression expr, IDictionary<string, bool> orderFields = null, int? limit = null, int? offset = null)
         {
-            Select(type, resultAction, (expr != null) ? DataBase.ParseConditionExpression(expr) : null, orderFields);
+            Select(type, resultAction, (expr != null) ? DataBase.ParseConditionExpression(expr) : null, orderFields, limit, offset);
         }
 
-        public void Select<T, P>(Type[] types, Action<IEnumerable<object>> resultAction, LambdaExpression expr, IDictionary<Expression<Func<T, P>>, bool> orderFields = null)
+        public void Select<T, P>(Type[] types, Action<IEnumerable<object>> resultAction, LambdaExpression expr, IDictionary<Expression<Func<T, P>>, bool> orderFields = null, int? limit = null, int? offset = null)
         {
-            Select(types, resultAction, (expr != null) ? DataBase.ParseConditionExpression(expr) : null, orderFields?.ToDictionary(x => DataBase.GetField(x.Key).GetSelectName(true), x => x.Value));
+            Select(types, resultAction, (expr != null) ? DataBase.ParseConditionExpression(expr) : null, orderFields?.ToDictionary(x => DataBase.GetField(x.Key).GetSelectName(true), x => x.Value), limit, offset);
         }
 
-        public void Select(Type[] types, Action<IEnumerable<object>> resultAction, LambdaExpression expr, IDictionary<string, bool> orderFields = null)
+        public void Select(Type[] types, Action<IEnumerable<object>> resultAction, LambdaExpression expr, IDictionary<string, bool> orderFields = null, int? limit = null, int? offset = null)
         {
-            Select(types, resultAction, (expr != null) ? DataBase.ParseConditionExpression(expr) : null, orderFields);
+            Select(types, resultAction, (expr != null) ? DataBase.ParseConditionExpression(expr) : null, orderFields, limit, offset);
         }
 
-        public void Select(Type type, Action<object> resultAction, IEnumerable<Conditions.Condition> conditions = null, IDictionary<string, bool> orderFields = null)
+        public void Select(Type type, Action<object> resultAction, IEnumerable<Conditions.Condition> conditions = null, IDictionary<string, bool> orderFields = null, int? limit = null, int? offset = null)
         {
             Select(new[] { type }, (objects) => {
                 if (resultAction != null && objects != null && objects.Any())
@@ -132,10 +136,10 @@ namespace Birko.Data.SQL.Connectors
                     var data = objects.First();
                     resultAction(data);
                 }
-            }, conditions, orderFields);
+            }, conditions, orderFields, limit, offset);
         }
 
-        public void Select(IEnumerable<Type> types, Action<IEnumerable<object>> resultAction, IEnumerable<Conditions.Condition> conditions = null, IDictionary<string, bool> orderFields = null)
+        public void Select(IEnumerable<Type> types, Action<IEnumerable<object>> resultAction, IEnumerable<Conditions.Condition> conditions = null, IDictionary<string, bool> orderFields = null, int? limit = null, int? offset = null)
         {
             if (types != null)
             {
@@ -152,16 +156,16 @@ namespace Birko.Data.SQL.Connectors
                         }
                         resultAction(objects.ToArray());
                     }
-                }, conditions, orderFields);
+                }, conditions, orderFields, limit, offset);
             }
         }
 
-        public void Select(Tables.Table table, Action<IDictionary<int, string>, DbDataReader> readAction, IEnumerable<Conditions.Condition> conditions = null, IDictionary<string, bool> orderFields = null)
+        public void Select(Tables.Table table, Action<IDictionary<int, string>, DbDataReader> readAction, IEnumerable<Conditions.Condition> conditions = null, IDictionary<string, bool> orderFields = null, int? limit = null, int? offset = null)
         {
-            Select(new[] { table }, readAction, conditions, orderFields);
+            Select(new[] { table }, readAction, conditions, orderFields, limit, offset);
         }
 
-        public void Select(IEnumerable<Tables.Table> tables, Action<IDictionary<int, string>, DbDataReader> readAction, IEnumerable<Conditions.Condition> conditions = null, IDictionary<string, bool> orderFields = null)
+        public void Select(IEnumerable<Tables.Table> tables, Action<IDictionary<int, string>, DbDataReader> readAction, IEnumerable<Conditions.Condition> conditions = null, IDictionary<string, bool> orderFields = null, int? limit = null, int? offset = null)
         {
             if (tables != null)
             {
@@ -176,21 +180,21 @@ namespace Birko.Data.SQL.Connectors
                         i++;
                     }
                 }
-                Select(tables.Where(x => x != null).Select(x=>x.Name), fields, readAction, conditions, orderFields);
+                Select(tables.Where(x => x != null).Select(x=>x.Name), fields, readAction, conditions, orderFields, limit, offset);
             }
         }
 
-        public void Select(string tableName, IDictionary<int, string> fields, Action<IDictionary<int, string>, DbDataReader> readAction = null, IEnumerable<Conditions.Condition> conditions = null, IDictionary<string, bool> orderFields = null)
+        public void Select(string tableName, IDictionary<int, string> fields, Action<IDictionary<int, string>, DbDataReader> readAction = null, IEnumerable<Conditions.Condition> conditions = null, IDictionary<string, bool> orderFields = null, int? limit = null, int? offset = null)
         {
-            Select(new[] { tableName }, fields, readAction, conditions, orderFields);
+            Select(new[] { tableName }, fields, readAction, conditions, orderFields, limit, offset);
         }
 
-        public void Select(IEnumerable<string> tableNames, IDictionary<int, string> fields, Action<IDictionary<int, string>, DbDataReader> readAction = null, IEnumerable<Conditions.Condition> conditions = null, IDictionary<string, bool> orderFields = null)
+        public void Select(IEnumerable<string> tableNames, IDictionary<int, string> fields, Action<IDictionary<int, string>, DbDataReader> readAction = null, IEnumerable<Conditions.Condition> conditions = null, IDictionary<string, bool> orderFields = null, int? limit = null, int? offset = null)
         {
             if(tableNames != null && tableNames.Any() && tableNames.Any(x=>!string.IsNullOrEmpty(x)))
             {
                 DoCommand((command) => {
-                    command = CreateSelectCommand(command, tableNames.Where(x => !string.IsNullOrEmpty(x)).Distinct(), fields, conditions, orderFields);
+                    command = CreateSelectCommand(command, tableNames.Where(x => !string.IsNullOrEmpty(x)).Distinct(), fields, conditions, orderFields, limit, offset);
                 }, (command) => {
                     using (var reader = command.ExecuteReader())
                     {

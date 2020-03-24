@@ -10,12 +10,14 @@ namespace Birko.Data.SQL.Connectors
 {
     public delegate void InitConnector(AbstractConnector connector);
     public delegate void OnException(Exception ex, string commandText);
+    public delegate void OnExecute(string commandText);
 
     public abstract partial class AbstractConnector
     {
         protected readonly Stores.PasswordSettings _settings = null;
         public event InitConnector OnInit;
         public event OnException OnException;
+        public event OnExecute OnExecute;
 
         public bool IsInit { get; private set; } = false;
 
@@ -205,13 +207,13 @@ namespace Birko.Data.SQL.Connectors
                                         switch (condition.Type)
                                         {
                                             case Conditions.ConditionType.StartsWith:
-                                                value = "%" + (first as string);
+                                                value = (first as string) + "%";
                                                 break;
                                             case Conditions.ConditionType.Like:
                                                 value = "%" + (first as string) + "%";
                                                 break;
                                             case Conditions.ConditionType.EndsWith:
-                                                value = (first as string) + "%";
+                                                value = "%" + (first as string);
                                                 break;
                                             default:
                                                 value = first;
@@ -261,6 +263,21 @@ namespace Birko.Data.SQL.Connectors
             return result.ToString();
         }
 
+        public virtual string LimitOffsetDefinition(DbCommand command, int? limit = null, int? offset = null)
+        {
+            var result = new StringBuilder();
+            if (limit != null) {
+                result.Append(" LIMIT @LIMIT");
+                AddParameter(command, "@LIMIT", limit.Value);
+                if (offset != null)
+                {
+                    result.Append(" OFFSET @OFFSET");
+                    AddParameter(command, "@OFFSET", offset.Value);
+                }
+            }
+            return result.ToString();
+        }
+
         public virtual DbCommand AddWhere(IEnumerable<Conditions.Condition> conditions, DbCommand command)
         {
             if (command != null && conditions != null && conditions.Any())
@@ -301,6 +318,7 @@ namespace Birko.Data.SQL.Connectors
                             command.Transaction = transaction;
                             createCommand?.Invoke(command);
                             commandText = DataBase.GetGeneratedQuery(command);
+                            OnExecute?.Invoke(commandText);
                             executeCommand?.Invoke(command);
                         }
                         transaction.Commit();
@@ -309,6 +327,10 @@ namespace Birko.Data.SQL.Connectors
                     {
                         transaction.Rollback();
                         InitException(ex, commandText);
+                    }
+                    finally
+                    {
+                        db.Close();
                     }
                 }
             }
