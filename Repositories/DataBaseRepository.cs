@@ -95,14 +95,14 @@ namespace Birko.Data.Repositories
             var _store = Store;
             if (_store != null)
             {
-                TViewModel result = default(TViewModel);
+                TViewModel result = default;
                 Read(expr, (item) =>
                 {
                     result = item;
                 }, orderByExpr);
                 return result;
             }
-            return default(TViewModel);
+            return default;
         }
 
         public virtual void ReadView<TView>(Action<TView> readAction, IDictionary<Expression<Func<TModel, object>>, bool> orderByExpr = null)

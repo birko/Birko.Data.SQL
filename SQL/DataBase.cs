@@ -130,11 +130,26 @@ namespace Birko.Data.SQL
                 }
                 else if (expr is MethodCallExpression callExpression)
                 {
-                    var key = "@Constat" + parameters.Count;
-                    var f = Expression.Lambda(callExpression).Compile();
-                    var value = f.DynamicInvoke();
-                    parameters.Add(key, value);
-                    return key;
+                    if (callExpression.Method.Name == "Replace")
+                    {
+                        StringBuilder result = new StringBuilder();
+                        //maybe platform specific implementation
+                        result.AppendFormat("REPLACE({0}", ParseExpression(callExpression.Object, parameters, withTableName, exprType));
+                        foreach (var argument in callExpression.Arguments)
+                        {
+                            result.AppendFormat(", {0}", ParseExpression(argument, parameters, withTableName, exprType));
+                        }
+                        result.Append(")");
+                        return result.ToString();
+                    }
+                    else
+                    {
+                        var key = "@Constat" + parameters.Count;
+                        var f = Expression.Lambda(callExpression).Compile();
+                        var value = f.DynamicInvoke();
+                        parameters.Add(key, value);
+                        return key;
+                    }
                 }
                 else if (expr is UnaryExpression unaryExpression)
                 {
@@ -395,7 +410,7 @@ namespace Birko.Data.SQL
         private static List<object> InvokeExpression(Expression expr)
         {
             List<object> vals = new List<object>();
-            object value = null;
+            object value;
             if (expr is ConstantExpression constantExpression)
             {
                 value = constantExpression.Value;

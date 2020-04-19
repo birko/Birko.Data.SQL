@@ -203,22 +203,13 @@ namespace Birko.Data.SQL.Connectors
                                 {
                                     if (!condition.IsField)
                                     {
-                                        object value = null;
-                                        switch (condition.Type)
+                                        object value = condition.Type switch
                                         {
-                                            case Conditions.ConditionType.StartsWith:
-                                                value = (first as string) + "%";
-                                                break;
-                                            case Conditions.ConditionType.Like:
-                                                value = "%" + (first as string) + "%";
-                                                break;
-                                            case Conditions.ConditionType.EndsWith:
-                                                value = "%" + (first as string);
-                                                break;
-                                            default:
-                                                value = first;
-                                                break;
-                                        }
+                                            Conditions.ConditionType.StartsWith => (first as string) + "%",
+                                            Conditions.ConditionType.Like => "%" + (first as string) + "%",
+                                            Conditions.ConditionType.EndsWith => "%" + (first as string),
+                                            _ => first,
+                                        };
                                         value = EscapeValue(value);
                                         var count = command.Parameters?.Count ?? 0;
                                         result.Append("@WHERE" + condition.Name.Replace(".", string.Empty) + "_" + count);
@@ -305,34 +296,30 @@ namespace Birko.Data.SQL.Connectors
 
         private void RunCommand(Action<DbCommand> createCommand, Action<DbCommand> executeCommand)
         {
-            using (var db = CreateConnection(_settings))
+            using var db = CreateConnection(_settings);
+            db.Open();
+            using var transaction = db.BeginTransaction();
+            string commandText = null;
+            try
             {
-                db.Open();
-                using (var transaction = db.BeginTransaction())
+                using (var command = db.CreateCommand())
                 {
-                    string commandText = null;
-                    try
-                    {
-                        using (var command = db.CreateCommand())
-                        {
-                            command.Transaction = transaction;
-                            createCommand?.Invoke(command);
-                            commandText = DataBase.GetGeneratedQuery(command);
-                            OnExecute?.Invoke(commandText);
-                            executeCommand?.Invoke(command);
-                        }
-                        transaction.Commit();
-                    }
-                    catch (Exception ex)
-                    {
-                        transaction.Rollback();
-                        InitException(ex, commandText);
-                    }
-                    finally
-                    {
-                        db.Close();
-                    }
+                    command.Transaction = transaction;
+                    createCommand?.Invoke(command);
+                    commandText = DataBase.GetGeneratedQuery(command);
+                    OnExecute?.Invoke(commandText);
+                    executeCommand?.Invoke(command);
                 }
+                transaction.Commit();
+            }
+            catch (Exception ex)
+            {
+                transaction.Rollback();
+                InitException(ex, commandText);
+            }
+            finally
+            {
+                db.Close();
             }
         }
     }

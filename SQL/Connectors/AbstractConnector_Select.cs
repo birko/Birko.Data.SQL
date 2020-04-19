@@ -69,19 +69,13 @@ namespace Birko.Data.SQL.Connectors
                     var joingroups = joins[table].GroupBy(x => new { x.Right, x.JoinType }).ToDictionary(x => x.Key, x => x.SelectMany(y => y.Conditions).Where(z => z != null));
                     foreach (var joingroup in joingroups.Where(x=>x.Value.Any()))
                     {
-                        switch (joingroup.Key.JoinType)
-                        {
-                            case Conditions.JoinType.Inner:
-                                command.CommandText += " INNER JOIN ";
-                                break;
-                            case Conditions.JoinType.LeftOuter:
-                                command.CommandText += " LEFT OUTER JOIN ";
-                                break;
-                            case Conditions.JoinType.Cross:
-                            default:
-                                command.CommandText += " CROSS JOIN ";
-                                break;
-                        }
+                        command.CommandText +=
+                            joingroup.Key.JoinType switch
+                            {
+                                Conditions.JoinType.Inner => " INNER JOIN ",
+                                Conditions.JoinType.LeftOuter => " LEFT OUTER JOIN ",
+                                _ => " CROSS JOIN ",
+                            };
                         command.CommandText += joingroup.Key.Right;
                         if (joingroup.Key.JoinType != Conditions.JoinType.Cross && joingroup.Value != null && joingroup.Value.Any())
                         {
@@ -196,30 +190,28 @@ namespace Birko.Data.SQL.Connectors
                 DoCommand((command) => {
                     command = CreateSelectCommand(command, tableNames.Where(x => !string.IsNullOrEmpty(x)).Distinct(), fields, conditions, orderFields, limit, offset);
                 }, (command) => {
-                    using (var reader = command.ExecuteReader())
+                    using var reader = command.ExecuteReader();
+                    try
                     {
-                        try
-                        {
 
-                            if (reader.HasRows)
+                        if (reader.HasRows)
+                        {
+                            bool isNext = reader.Read();
+                            while (isNext)
                             {
-                                bool isNext = reader.Read();
-                                while (isNext)
-                                {
-                                    readAction?.Invoke(fields, reader);
-                                    isNext = reader.Read();
-                                }
+                                readAction?.Invoke(fields, reader);
+                                isNext = reader.Read();
                             }
-                            reader.Close();
                         }
-                        catch (Exception ex)
-                        {
-                            throw ex;
-                        }
-                        finally
-                        {
-                            reader.Close();
-                        }
+                        reader.Close();
+                    }
+                    catch (Exception ex)
+                    {
+                        throw ex;
+                    }
+                    finally
+                    {
+                        reader.Close();
                     }
                 });
             }
