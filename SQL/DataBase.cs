@@ -9,6 +9,7 @@ using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
 using System.Text;
+using System.Collections;
 
 namespace Birko.Data.SQL
 {
@@ -382,7 +383,7 @@ namespace Birko.Data.SQL
                             {
                                 Type type = constantExpression.Value.GetType();
                                 var value = type.InvokeMember(memberExpression.Member.Name, BindingFlags.GetField, null, constantExpression.Value, null);
-                                parent.Values = new[] { value };
+                                parent.Values = (!(value is string) && (value is IEnumerable)) ? (IEnumerable)value : new[] { value };
                             }
                             //else if (memberExpression.Expression != null)
                             //{
