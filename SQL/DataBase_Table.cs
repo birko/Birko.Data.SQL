@@ -42,25 +42,38 @@ namespace Birko.Data.SQL
             }
             if (!_tableCache.ContainsKey(type))
             {
-                object[] attrs = type.GetCustomAttributes(typeof(Attributes.Table), true);
+                IEnumerable<object> attrs = type.GetCustomAttributes(typeof(Attributes.Table), true)
+                    .Concat(type.GetCustomAttributes(typeof(System.ComponentModel.DataAnnotations.Schema.TableAttribute), true));
                 if (attrs != null)
                 {
-                    foreach (Attributes.Table attr in attrs)
+                    foreach (Attribute attr in attrs)
                     {
-                        Tables.Table table = new Tables.Table()
+                        string tableName = null;
+                        if (attr is Attributes.Table birkoTable)
                         {
-                            Name = attr.Name,
-                            Type = type,
-                            Fields = LoadFields(type).ToDictionary(x => x.Name),
-                        };
-                        if (table.Fields != null && table.Fields.Any())
+                            tableName = birkoTable.Name;
+                        }
+                        else if (attr is System.ComponentModel.DataAnnotations.Schema.TableAttribute dataTable)
                         {
-                            foreach (var field in table.Fields)
+                            tableName = dataTable.Name;
+                        }
+                        if (!string.IsNullOrEmpty(tableName))
+                        {
+                            Tables.Table table = new Tables.Table()
                             {
-                                field.Value.Table = table;
+                                Name = tableName,
+                                Type = type,
+                                Fields = LoadFields(type).ToDictionary(x => x.Name),
+                            };
+                            if (table.Fields != null && table.Fields.Any())
+                            {
+                                foreach (var field in table.Fields)
+                                {
+                                    field.Value.Table = table;
+                                }
+                                _tableCache.Add(type, table);
+                                return table;
                             }
-                            _tableCache.Add(type, table);
-                            return table;
                         }
                     }
                     return null;
