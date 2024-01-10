@@ -37,7 +37,7 @@ namespace Birko.Data.SQL.Connectors
             {
                 foreach (var field in fields.Where(x => x != null))
                 {
-                    DoCommand((command) => {
+                    DoCommandWithTransaction((command) => {
                         command.CommandText = "ALTER TABLE "
                             + tableName
                             + " ADD COLUMN "

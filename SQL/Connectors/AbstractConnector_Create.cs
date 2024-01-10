@@ -51,7 +51,7 @@ namespace Birko.Data.SQL.Connectors
 
         public virtual void CreateTable(string name, IEnumerable<string> fields)
         {
-            DoCommand((command) =>
+            DoCommandWithTransaction((command) =>
             {
                 command.CommandText = "CREATE TABLE IF NOT EXISTS "
                     + name

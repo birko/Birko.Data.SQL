@@ -133,7 +133,7 @@ namespace Birko.Data.SQL.Connectors
         {
             if (values != null && values.Any())
             {
-                DoCommand((command) => {
+                DoCommandWithTransaction((command) => {
                     command.CommandText = "UPDATE " + tableName + " SET ";
                     if (!isExpressionValues)
                     {

@@ -11,6 +11,9 @@
   <ItemGroup>
     <Compile Include="$(MSBuildThisFileDirectory)Attributes\Field.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Attributes\Table.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Extensions\IDataBaseRepository.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Repositories\DataBaseBulkRepository.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Repositories\IDataBaseRepository.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Conditions\Condition.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Conditions\Join.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\AbstractConnector.cs" />
@@ -40,6 +43,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)Models\AbstractLogModel.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Models\AbstractModel.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Repositories\DataBaseRepository.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Stores\DataBaseBulkStore.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Stores\DataBaseStore.cs" />
   </ItemGroup>
 </Project>

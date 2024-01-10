@@ -9,13 +9,23 @@ namespace Birko.Data.SQL.Connectors
 {
     public abstract partial class AbstractConnector
     {
-        public virtual DbCommand CreateSelectCommand(DbCommand command, IEnumerable<string> tableNames, IDictionary<int, string> fields, IEnumerable<Conditions.Condition> conditions = null, IDictionary<string, bool> orderFields = null, int? limit = null, int? offset = null)
+        public virtual DbCommand CreateSelectCommand(DbCommand command, IEnumerable<string> tableNames, IDictionary<int, string> fields, IEnumerable<Conditions.Condition>? conditions = null, IDictionary<string, bool>? orderFields = null, int? limit = null, int? offset = null)
         {
             return CreateSelectCommand(command, tableNames, fields, null, conditions, null, orderFields, limit, offset);
         }
 
-        public virtual DbCommand CreateSelectCommand(DbCommand command, Tables.View view, IEnumerable<Conditions.Condition> conditions = null, IDictionary<string, bool> orderFields = null, int? limit = null, int? offset = null)
+        public virtual DbCommand CreateSelectCommand(DbCommand command, Tables.View view, IEnumerable<Conditions.Condition>? conditions = null, IDictionary<string, bool>? orderFields = null, int? limit = null, int? offset = null)
         {
+            if (view == null)
+            { 
+                throw new ArgumentNullException(nameof(view)); 
+            }
+
+            if (view.Join == null)
+            {
+                throw new ArgumentNullException(nameof(view.Join));
+            }
+
             var leftTables = view.Join?.Select(x => x.Left).Distinct().Where(x => !string.IsNullOrEmpty(x)).ToList();
             if (leftTables != null)
             {
@@ -27,16 +37,15 @@ namespace Birko.Data.SQL.Connectors
             return CreateSelectCommand(command, leftTables ?? view.Tables.Select(x => x.Name), view.GetSelectFields(), view.Join, conditions, view.HasAggregateFields() ? view.GetSelectFields(true) : null, orderFields, limit, offset);
         }
 
-
-        public virtual DbCommand CreateSelectCommand(DbCommand command, IEnumerable<string> tableNames, IDictionary<int, string> fields, IEnumerable<Conditions.Join> joinconditions = null, IEnumerable<Conditions.Condition> conditions = null, IDictionary<int, string> groupFields = null, IDictionary<string, bool> orderFields = null, int? limit = null, int? offset = null)
+        public virtual DbCommand CreateSelectCommand(DbCommand command, IEnumerable<string> tableNames, IDictionary<int, string> fields, IEnumerable<Conditions.Join>? joinconditions = null, IEnumerable<Conditions.Condition>? conditions = null, IDictionary<int, string>? groupFields = null, IDictionary<string, bool>? orderFields = null, int? limit = null, int? offset = null)
         {
             command.CommandText = "SELECT " + string.Join(", ", fields.Values) + " FROM ";
 
-            Dictionary<string, List<Conditions.Join>> joins = new Dictionary<string, List<Conditions.Join>>();
+            Dictionary<string, List<Conditions.Join>> joins = new();
             if (joinconditions != null && joinconditions.Any())
             {
-                string prevleft = null;
-                string prevright = null;
+                string? prevleft = null;
+                string? prevright = null;
                 foreach (var join in joinconditions)
                 {
                     if (!string.IsNullOrEmpty(prevleft) && !string.IsNullOrEmpty(prevright) && !joins.ContainsKey(join.Left) && prevright == join.Left && joins.ContainsKey(prevleft))
@@ -102,118 +111,142 @@ namespace Birko.Data.SQL.Connectors
             return command;
         }
 
-        public void Select<T, P>(Type type, Action<object> resultAction, LambdaExpression expr, IDictionary<Expression<Func<T, P>>, bool> orderFields = null, int? limit = null, int? offset = null)
+        public IEnumerable<object> Select<T, P>(Type type, LambdaExpression? expr = null, IDictionary<Expression<Func<T, P>>, bool>? orderFields = null, int? limit = null, int? offset = null)
         {
-            Select(type, resultAction, (expr != null) ? DataBase.ParseConditionExpression(expr) : null, orderFields?.ToDictionary(x => DataBase.GetField(x.Key).GetSelectName(false), x => x.Value), limit, offset);
-        }
-
-        public void Select(Type type, Action<object> resultAction, LambdaExpression expr, IDictionary<string, bool> orderFields = null, int? limit = null, int? offset = null)
-        {
-            Select(type, resultAction, (expr != null) ? DataBase.ParseConditionExpression(expr) : null, orderFields, limit, offset);
-        }
-
-        public void Select<T, P>(Type[] types, Action<IEnumerable<object>> resultAction, LambdaExpression expr, IDictionary<Expression<Func<T, P>>, bool> orderFields = null, int? limit = null, int? offset = null)
-        {
-            Select(types, resultAction, (expr != null) ? DataBase.ParseConditionExpression(expr) : null, orderFields?.ToDictionary(x => DataBase.GetField(x.Key).GetSelectName(true), x => x.Value), limit, offset);
-        }
-
-        public void Select(Type[] types, Action<IEnumerable<object>> resultAction, LambdaExpression expr, IDictionary<string, bool> orderFields = null, int? limit = null, int? offset = null)
-        {
-            Select(types, resultAction, (expr != null) ? DataBase.ParseConditionExpression(expr) : null, orderFields, limit, offset);
-        }
-
-        public void Select(Type type, Action<object> resultAction, IEnumerable<Conditions.Condition> conditions = null, IDictionary<string, bool> orderFields = null, int? limit = null, int? offset = null)
-        {
-            Select(new[] { type }, (objects) => {
-                if (resultAction != null && objects != null && objects.Any())
-                {
-                    var data = objects.First();
-                    resultAction(data);
-                }
-            }, conditions, orderFields, limit, offset);
-        }
-
-        public void Select(IEnumerable<Type> types, Action<IEnumerable<object>> resultAction, IEnumerable<Conditions.Condition> conditions = null, IDictionary<string, bool> orderFields = null, int? limit = null, int? offset = null)
-        {
-            if (types != null)
+            foreach (var o in Select(type, (expr != null) ? DataBase.ParseConditionExpression(expr) : null, orderFields?.ToDictionary(x => DataBase.GetField(x.Key).GetSelectName(false), x => x.Value), limit, offset))
             {
-                Select(types.Select(x=> DataBase.LoadTable(x)), (fields, reader) => {
-                    if (resultAction != null)
-                    {
-                        var index = 0;
-                        List<object> objects = new List<object>();
-                        foreach (var type in types)
-                        {
-                            var data = Activator.CreateInstance(type, new object[0]);
-                            index = DataBase.Read(reader, data, index);
-                            objects.Add(data);
-                        }
-                        resultAction(objects.ToArray());
-                    }
-                }, conditions, orderFields, limit, offset);
+                yield return o;
             }
         }
 
-        public void Select(Tables.Table table, Action<IDictionary<int, string>, DbDataReader> readAction, IEnumerable<Conditions.Condition> conditions = null, IDictionary<string, bool> orderFields = null, int? limit = null, int? offset = null)
+        public IEnumerable<object> Select(Type type, LambdaExpression? expr = null, IDictionary<string, bool>? orderFields = null, int? limit = null, int? offset = null)
         {
-            Select(new[] { table }, readAction, conditions, orderFields, limit, offset);
-        }
-
-        public void Select(IEnumerable<Tables.Table> tables, Action<IDictionary<int, string>, DbDataReader> readAction, IEnumerable<Conditions.Condition> conditions = null, IDictionary<string, bool> orderFields = null, int? limit = null, int? offset = null)
-        {
-            if (tables != null)
+            foreach (var o in Select(type, (expr != null) ? DataBase.ParseConditionExpression(expr) : null, orderFields, limit, offset))
             {
-                Dictionary<int, string> fields = new Dictionary<int, string>();
-                int i = 0;
-                foreach(var table in tables.Where(x=> x != null))
-                {
-                    var tablefields = table.GetSelectFields(true);
-                    foreach (var kvp in tablefields)
-                    {
-                        fields.Add(i, kvp.Value);
-                        i++;
-                    }
-                }
-                Select(tables.Where(x => x != null).Select(x=>x.Name), fields, readAction, conditions, orderFields, limit, offset);
+                yield return o;
             }
         }
 
-        public void Select(string tableName, IDictionary<int, string> fields, Action<IDictionary<int, string>, DbDataReader> readAction = null, IEnumerable<Conditions.Condition> conditions = null, IDictionary<string, bool> orderFields = null, int? limit = null, int? offset = null)
+        public IEnumerable<object> Select<T, P>(Type[] types, LambdaExpression? expr = null, IDictionary<Expression<Func<T, P>>, bool>? orderFields = null, int? limit = null, int? offset = null)
         {
-            Select(new[] { tableName }, fields, readAction, conditions, orderFields, limit, offset);
+            foreach (var o in Select(types, (expr != null) ? DataBase.ParseConditionExpression(expr) : null, orderFields?.ToDictionary(x => DataBase.GetField(x.Key).GetSelectName(true), x => x.Value), limit, offset))
+            {
+                yield return o;
+            }
         }
 
-        public void Select(IEnumerable<string> tableNames, IDictionary<int, string> fields, Action<IDictionary<int, string>, DbDataReader> readAction = null, IEnumerable<Conditions.Condition> conditions = null, IDictionary<string, bool> orderFields = null, int? limit = null, int? offset = null)
+        public IEnumerable<object> Select(Type[] types, LambdaExpression expr, IDictionary<string, bool> orderFields = null, int? limit = null, int? offset = null)
         {
-            if(tableNames != null && tableNames.Any() && tableNames.Any(x=>!string.IsNullOrEmpty(x)))
+            foreach (var item in Select(types, (expr != null) ? DataBase.ParseConditionExpression(expr) : null, orderFields, limit, offset))
             {
-                DoCommand((command) => {
-                    command = CreateSelectCommand(command, tableNames.Where(x => !string.IsNullOrEmpty(x)).Distinct(), fields, conditions, orderFields, limit, offset);
-                }, (command) => {
-                    using var reader = command.ExecuteReader();
-                    try
-                    {
+                yield return item;
+            }
+        }
 
-                        if (reader.HasRows)
-                        {
-                            bool isNext = reader.Read();
-                            while (isNext)
-                            {
-                                readAction?.Invoke(fields, reader);
-                                isNext = reader.Read();
-                            }
-                        }
-                        reader.Close();
-                    }
-                    catch (Exception ex)
-                    {
-                        throw ex;
-                    }
-                    finally
-                    {
-                        reader.Close();
-                    }
-                });
+        public IEnumerable<object> Select(Type type, IEnumerable<Conditions.Condition> conditions = null, IDictionary<string, bool> orderFields = null, int? limit = null, int? offset = null)
+        {
+            foreach (var items in Select(new[] { type }, conditions, orderFields, limit, offset))
+            {
+                yield return items.FirstOrDefault();
+            }
+        }
+
+        public IEnumerable<IEnumerable<object>> Select(IEnumerable<Type> types, IEnumerable<Conditions.Condition>? conditions = null, IDictionary<string, bool>? orderFields = null, int? limit = null, int? offset = null)
+        {
+            if (types == null)
+            {
+                yield break;
+            }
+
+            foreach (var set in Select(types.Select(x => DataBase.LoadTable(x)), (fields, reader) =>
+            {
+                var index = 0;
+                List<object> objects = new();
+                foreach (var type in types)
+                {
+                    var data = Activator.CreateInstance(type, Array.Empty<object>());
+                    index = DataBase.Read(reader, fields, index);
+                    objects.Add(data);
+                }
+                return objects.AsEnumerable();
+            }, conditions, orderFields, limit, offset))
+            {
+                yield return set;
+            }
+        }
+
+        public IEnumerable<IEnumerable<object>> Select(
+            Tables.Table table,
+            Func<IDictionary<int, string>, DbDataReader, IEnumerable<object>>? transformFunction = null,
+            IEnumerable<Conditions.Condition>? conditions = null,
+            IDictionary<string, bool>? orderFields = null,
+            int? limit = null, 
+            int? offset = null
+        )
+        {
+            foreach (var item in  Select(new[] { table }, transformFunction, conditions, orderFields, limit, offset))
+            {
+                yield return item;
+            }
+        }
+
+        public IEnumerable<IEnumerable<object>> Select(IEnumerable<Tables.Table> tables, Func<IDictionary<int, string>, DbDataReader, IEnumerable<object>>? transformFunction = null, IEnumerable<Conditions.Condition>? conditions = null, IDictionary<string, bool>? orderFields = null, int? limit = null, int? offset = null)
+        {
+            if (tables == null)
+            {
+                yield break;
+            }
+            Dictionary<int, string> fields = new Dictionary<int, string>();
+            int i = 0;
+            foreach (var table in tables.Where(x => x != null))
+            {
+                var tablefields = table.GetSelectFields(true);
+                foreach (var kvp in tablefields)
+                {
+                    fields.Add(i, kvp.Value);
+                    i++;
+                }
+            }
+
+            foreach (var item in Select(tables.Where(x => x != null).Select(x => x.Name), fields, (reader) => transformFunction?.Invoke(fields, reader) ?? null, conditions, orderFields, limit, offset))
+            {
+                yield return item;
+            }
+
+        }
+
+        public IEnumerable<IEnumerable<object>> Select(
+            string tableName, IDictionary<int, string> fields,
+            Func<DbDataReader, IEnumerable<object>>? transformFunction = null,
+            IEnumerable<Conditions.Condition>? conditions = null,
+            IDictionary<string, bool>? orderFields = null, 
+            int? limit = null, int? offset = null)
+        {
+            foreach (var item in Select(new[] { tableName }, fields, transformFunction, conditions, orderFields, limit, offset))
+            {
+                yield return item;
+            }
+        }
+
+        public IEnumerable<IEnumerable<object>> Select(
+            IEnumerable<string> tableNames,
+            IDictionary<int, string> fields,
+            Func<DbDataReader, IEnumerable<object>>? transformFunction = null,
+            IEnumerable<Conditions.Condition>? conditions = null, 
+            IDictionary<string, bool>? orderFields = null, 
+            int? limit = null, 
+            int? offset = null
+        )
+        {
+            if (!(tableNames?.Any(x => !string.IsNullOrEmpty(x)) ?? false))
+            {
+                yield break;
+            }
+            foreach(var item in RunReaderCommand((command) => {
+                command = CreateSelectCommand(command, tableNames.Where(x => !string.IsNullOrEmpty(x)).Distinct(), fields, conditions, orderFields, limit, offset);
+            }, transformFunction))
+            { 
+                yield return item; 
             }
         }
     }

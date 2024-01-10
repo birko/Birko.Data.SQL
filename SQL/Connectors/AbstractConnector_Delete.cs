@@ -36,7 +36,7 @@ namespace Birko.Data.SQL.Connectors
 
         private void Delete(string tableName, IEnumerable<Conditions.Condition> conditions = null)
         {
-            DoCommand((command) => {
+            DoCommandWithTransaction((command) => {
                 command.CommandText = "DELETE FROM " + tableName;
                 AddWhere(conditions, command);
             }, (command) => {
