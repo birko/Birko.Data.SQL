@@ -228,7 +228,7 @@ namespace Birko.Data.SQL
             return null;
         }
 
-        public static IEnumerable<Conditions.Condition> ParseConditionExpression(Expression expr, Conditions.Condition parent = null, Type exprType = null)
+        public static IEnumerable<Conditions.Condition> ParseConditionExpression(Expression? expr = null, Conditions.Condition parent = null, Type exprType = null)
         {
             if (expr != null)
             {
@@ -405,7 +405,7 @@ namespace Birko.Data.SQL
                     }
                 }
             }
-            return new Conditions.Condition[0];
+            return Array.Empty<Condition>();
         }
 
         private static List<object> InvokeExpression(Expression expr)

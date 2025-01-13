@@ -294,7 +294,22 @@ namespace Birko.Data.SQL.Connectors
             }
         }
 
-        private void RunCommand(Action<DbCommand> createCommand, Action<DbCommand> executeCommand)
+        public virtual void DoCommandWithTransaction(Action<DbCommand> createCommand, Action<DbCommand> executeCommand, bool isLock = false)
+        {
+            if (!isLock)
+            {
+                RunCommandTransaction(createCommand, executeCommand);
+            }
+            else
+            {
+                lock (_settings)
+                {
+                    RunCommandTransaction(createCommand, executeCommand);
+                }
+            }
+        }
+
+        private void RunCommandTransaction(Action<DbCommand> createCommand, Action<DbCommand> executeCommand)
         {
             using var db = CreateConnection(_settings);
             db.Open();
@@ -321,6 +336,104 @@ namespace Birko.Data.SQL.Connectors
             {
                 db.Close();
             }
+        }
+
+        private void RunCommand(Action<DbCommand> createCommand, Action<DbCommand> executeCommand)
+        {
+            using var db = CreateConnection(_settings);
+            db.Open();
+            string commandText = null;
+            try
+            {
+                using (var command = db.CreateCommand())
+                {
+                    createCommand?.Invoke(command);
+                    commandText = DataBase.GetGeneratedQuery(command);
+                    OnExecute?.Invoke(commandText);
+                    executeCommand?.Invoke(command);
+                }
+            }
+            catch (Exception ex)
+            {
+                InitException(ex, commandText);
+            }
+            finally
+            {
+                db.Close();
+            }
+        }
+
+        private IEnumerable<IEnumerable<object>> RunReaderCommand(Action<DbCommand> createCommand, Func<DbDataReader, IEnumerable<object>> transformFunction)
+        {
+            if (transformFunction == null)
+            {
+                throw new ArgumentNullException(nameof(transformFunction));
+            }
+
+            using var db = CreateConnection(_settings);
+            db.Open();
+            string? commandText = null;
+            using (var command = db.CreateCommand())
+            {
+                DbDataReader reader = null;
+                try
+                {
+                    createCommand?.Invoke(command);
+                    commandText = DataBase.GetGeneratedQuery(command);
+                    OnExecute?.Invoke(commandText);
+                    reader = command.ExecuteReader();
+                }
+                catch (Exception ex)
+                {
+                    InitException(ex, commandText);
+                    reader = null;
+                }
+                if (reader?.HasRows ?? false)
+                {
+                    bool isNext = false;
+                    try
+                    {
+                        isNext = reader.Read();
+                    }
+                    catch (Exception ex)
+                    {
+                        InitException(ex, commandText);
+                        isNext = false;
+                    }
+                    while (isNext)
+                    {
+                        IEnumerable<object> row = null;
+                        try
+                        {
+                            row = transformFunction.Invoke(reader);
+                        }
+                        catch (Exception ex)
+                        {
+                            InitException(ex, commandText);
+                        }
+                        if (row != null)
+                        {
+                            yield return row;
+                            try
+                            {
+                                isNext = reader.Read();
+                            }
+                            catch (Exception ex)
+                            {
+                                InitException(ex, commandText);
+                                isNext = false;
+                            }
+                        }
+                        else 
+                        {
+                            isNext = false;
+                            break;
+                        }
+                    }
+                }
+                reader?.Close();
+            }
+            db.Close();
         }
     }
 }

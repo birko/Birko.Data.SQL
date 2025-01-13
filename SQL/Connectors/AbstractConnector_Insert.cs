@@ -59,7 +59,7 @@ namespace Birko.Data.SQL.Connectors
             if (values != null && values.Any() && values.All(x => x.Any()))
             {
                 var first = values.First();
-                DoCommand((command) =>
+                DoCommandWithTransaction((command) =>
                 {
                     command.CommandText = "INSERT INTO " + tableName
                                 + " (" + string.Join(", ", first.Keys) + ")"

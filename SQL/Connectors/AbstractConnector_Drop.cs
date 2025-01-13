@@ -37,7 +37,7 @@ namespace Birko.Data.SQL.Connectors
             {
                 foreach (var tableName in tables.Where(x => !string.IsNullOrEmpty(x)))
                 {
-                    DoCommand((command) => {
+                    DoCommandWithTransaction((command) => {
                         command.CommandText = "DROP TABLE IF EXISTS " + tableName;
                     }, (command) => {
                         command.ExecuteNonQuery();
