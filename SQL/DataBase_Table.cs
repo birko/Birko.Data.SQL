@@ -86,8 +86,6 @@ namespace Birko.Data.SQL
             return _tableCache[type];
         }
 
-
-
         public static int Read(DbDataReader reader, object data, int index = 0)
         {
             var type = data.GetType();

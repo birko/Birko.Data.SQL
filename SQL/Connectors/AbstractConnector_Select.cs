@@ -165,7 +165,7 @@ namespace Birko.Data.SQL.Connectors
                 foreach (var type in types)
                 {
                     var data = Activator.CreateInstance(type, Array.Empty<object>());
-                    index = DataBase.Read(reader, fields, index);
+                    index = DataBase.Read(reader, data, index);
                     objects.Add(data);
                 }
                 return objects.AsEnumerable();

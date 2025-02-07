@@ -1,15 +1,11 @@
 ﻿using Birko.Data.SQL.Conditions;
 using Birko.Data.SQL.Connectors;
 using Birko.Data.SQL.Fields;
-using Birko.Data.Models;
-using System;
-using System.Collections.Generic;
+using System.Collections;
 using System.Data.Common;
-using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
 using System.Text;
-using System.Collections;
 
 namespace Birko.Data.SQL
 {
@@ -48,10 +44,21 @@ namespace Birko.Data.SQL
 
         public static string GetGeneratedQuery(DbCommand dbCommand)
         {
+            var stringTypes = new[] {
+                System.Data.DbType.Guid,
+                System.Data.DbType.String,
+                System.Data.DbType.StringFixedLength,
+                System.Data.DbType.AnsiString,
+                System.Data.DbType.AnsiStringFixedLength,
+            };
             var query = dbCommand.CommandText;
             foreach (DbParameter parameter in dbCommand.Parameters)
             {
-                query = query.Replace(parameter.ParameterName, parameter.Value.ToString());
+                bool isString = stringTypes.Contains(parameter.DbType);
+                string value = isString
+                        ? "'" + parameter.Value?.ToString() + "'"
+                        : parameter.Value?.ToString();
+                query = query.Replace(parameter.ParameterName, value);
             }
 
             return query;
@@ -235,7 +242,8 @@ namespace Birko.Data.SQL
                 if (expr is LambdaExpression lambdaExpression)
                 {
                     var type = lambdaExpression.Parameters?.FirstOrDefault()?.Type;
-                    return ParseConditionExpression(lambdaExpression.Body, parent, type);
+                    var res = ParseConditionExpression(lambdaExpression.Body, parent, type);
+                    return res;
                 }
                 else if (expr is UnaryExpression unaryExpression)
                 {
@@ -245,57 +253,96 @@ namespace Birko.Data.SQL
                     }
                     if (parent != null)
                     {
-                        return new [] { parent };
+                        return new[] { parent };
                     }
                 }
-                var basecondition = new Conditions.Condition(null, null);
+
                 if (expr is BinaryExpression binaryExpression)
                 {
+                    bool isAnd = false;
+                    bool isOR = false;
+                    bool isNot = false;
+                    ConditionType conditionType = ConditionType.Equal;
                     switch (expr.NodeType)
                     {
                         case ExpressionType.And:
                         case ExpressionType.AndAlso:
-                            basecondition.IsOr = false;
+                            isAnd = true;
+                            isOR = false;
                             break;
                         case ExpressionType.Or:
                         case ExpressionType.OrElse:
-                            basecondition.IsOr = true;
+                            isAnd = false;
+                            isOR = true;
                             break;
                         case ExpressionType.Equal:
-                            basecondition.Type = ConditionType.Equal;
+                            conditionType = ConditionType.Equal;
                             break;
                         case ExpressionType.NotEqual:
-                            basecondition.Type = ConditionType.Equal;
-                            basecondition.IsNot = true;
+                            conditionType = ConditionType.Equal;
+                            isNot = true;
                             break;
                         case ExpressionType.LessThan:
-                            basecondition.Type = ConditionType.Less;
+                            conditionType = ConditionType.Less;
                             break;
                         case ExpressionType.LessThanOrEqual:
-                            basecondition.Type = ConditionType.LessAndEqual;
+                            conditionType = ConditionType.LessAndEqual;
                             break;
                         case ExpressionType.GreaterThan:
-                            basecondition.Type = ConditionType.Greather;
+                            conditionType = ConditionType.Greather;
                             break;
                         case ExpressionType.GreaterThanOrEqual:
-                            basecondition.Type = ConditionType.GreatherAndEqual;
+                            conditionType = ConditionType.GreatherAndEqual;
                             break;
                     }
-                    var left = ParseConditionExpression(binaryExpression.Left, basecondition, exprType);
-                    var right = ParseConditionExpression(binaryExpression.Right, basecondition, exprType);
-                    if (parent != null)
+
+                    if (isAnd || isOR)
                     {
-                        parent.SubConditions = (parent.SubConditions ?? (new Conditions.Condition[0])).Union(new[] { basecondition }).AsEnumerable();
-                        return new[] { parent };
+                        var basecondition = new Conditions.Condition(null, null)
+                        {
+                            IsOr = isOR,
+                            Type = conditionType,
+                            IsNot = isNot,
+                        };
+                        var left = new Conditions.Condition(null, null);
+                        ParseConditionExpression(binaryExpression.Left, left, exprType);
+                        var right = new Conditions.Condition(null, null);
+                        ParseConditionExpression(binaryExpression.Right, right, exprType);
+                        if (parent != null)
+                        {
+                            parent.SubConditions = (parent.SubConditions ?? []).Union(new[] { left, right });
+                            return new[] { parent };
+                        }
+                        else
+                        {
+                            basecondition.SubConditions = new[] { left, right };
+                            return new[] { basecondition };
+                        }
                     }
                     else
                     {
-                        return new[] { basecondition };
+                        var basecondition = new Conditions.Condition(null, null)
+                        {
+                            IsOr = isOR,
+                            Type = conditionType,
+                            IsNot = isNot,
+                        };
+                        var left = ParseConditionExpression(binaryExpression.Left, basecondition, exprType);
+                        var right = ParseConditionExpression(binaryExpression.Right, basecondition, exprType);
+                        if (parent != null)
+                        {
+                            parent.SubConditions = (parent.SubConditions ?? []).Union(new[] { basecondition }).AsEnumerable();
+                            return new[] { parent };
+                        }
+                        else
+                        {
+                            return new[] { basecondition };
+                        }
                     }
                 }
                 else if (expr is MethodCallExpression methodExpression)
                 {
-                    var condition = parent ?? basecondition;
+                    var condition = parent ?? new Conditions.Condition(null, null);
                     if (methodExpression.Method.Name == "StartsWith")
                     {
                         condition.Type = ConditionType.StartsWith;
@@ -306,6 +353,7 @@ namespace Birko.Data.SQL
                     }
                     if (methodExpression.Method.Name == "Contains")
                     {
+                        //condition.Name = 
                         if (methodExpression.Method.DeclaringType.Name == "String")
                         {
                             condition.Type = ConditionType.Like;
@@ -332,10 +380,14 @@ namespace Birko.Data.SQL
                 {
                     if (expr is ConstantExpression || expr is MethodCallExpression)
                     {
-                        List<object> vals = InvokeExpression(expr);
-                        if (vals != null && vals.Any())
+                        IEnumerable<object> vals = InvokeExpression(expr);
+                        if (vals?.Any(x => x != null) ?? false)
                         {
-                            parent.Values = vals.ToArray();
+                            parent.Values = vals.Where(x => x != null);
+                        }
+                        else
+                        {
+                            parent.Type = ConditionType.IsNull;
                         }
                     }
                     else if (expr is NewArrayExpression arrayExpresion)
@@ -350,6 +402,18 @@ namespace Birko.Data.SQL
                         string name = string.Empty;
                         if (
                             exprType != null
+                            && memberExpression.Expression.NodeType == ExpressionType.MemberAccess
+                            && memberExpression.Member.ReflectedType != null
+                            && Nullable.GetUnderlyingType(memberExpression.Member.ReflectedType) != null
+                        )
+                        {
+                            var member = new Condition(null, null);
+                            ParseConditionExpression(memberExpression.Expression, member, exprType);
+                            name = member.Name;
+                        }
+                        if (
+                            exprType != null
+                            && memberExpression.Member.ReflectedType != null
                             && memberExpression.Member.ReflectedType.IsAssignableFrom(exprType)
                             && memberExpression.Expression.NodeType == ExpressionType.Parameter
                         )
@@ -382,7 +446,7 @@ namespace Birko.Data.SQL
                             if (memberExpression.Expression is ConstantExpression constantExpression)
                             {
                                 Type type = constantExpression.Value.GetType();
-                                var value = type.InvokeMember(memberExpression.Member.Name, BindingFlags.GetField, null, constantExpression.Value, null);
+                                var value = type.InvokeMember(memberExpression.Member.Name, BindingFlags.GetField | BindingFlags.GetProperty, null, constantExpression.Value, null);
                                 parent.Values = (!(value is string) && (value is IEnumerable)) ? (IEnumerable)value : new[] { value };
                             }
                             //else if (memberExpression.Expression != null)
@@ -391,10 +455,14 @@ namespace Birko.Data.SQL
                             //}
                             else
                             {
-                                List<object> vals = InvokeExpression(expr);
-                                if (vals != null && vals.Any())
+                                IEnumerable<object> vals = InvokeExpression(expr);
+                                if (vals?.Any(x => x != null) ?? false)
                                 {
-                                    parent.Values = vals.ToArray();
+                                    parent.Values = vals.Where(x => x != null);
+                                }
+                                else 
+                                {
+                                    parent.Type = ConditionType.IsNull;
                                 }
                             }
                         }
@@ -408,9 +476,8 @@ namespace Birko.Data.SQL
             return Array.Empty<Condition>();
         }
 
-        private static List<object> InvokeExpression(Expression expr)
+        private static IEnumerable<object> InvokeExpression(Expression expr)
         {
-            List<object> vals = new List<object>();
             object value;
             if (expr is ConstantExpression constantExpression)
             {
@@ -421,35 +488,38 @@ namespace Birko.Data.SQL
                 var f = Expression.Lambda(expr).Compile();
                 value = f.DynamicInvoke();
             }
-            if (value != null)
-            {
 
-                var valueType = value.GetType();
-                if (valueType.IsPrimitive || valueType == typeof(string) || valueType == typeof(Guid))
+            if (value == null)
+            {
+                return null;
+            }
+
+            List<object> vals = new List<object>();
+            var valueType = value.GetType();
+            if (valueType.IsPrimitive || valueType == typeof(string) || valueType == typeof(Guid))
+            {
+                vals.Add(value);
+            }
+            else if (valueType.IsArray)
+            {
+                foreach (var item in (Array)value)
                 {
-                    vals.Add(value);
+                    vals.Add(item);
                 }
-                else if (valueType.IsArray)
+            }
+            else
+            {
+                var fields = valueType.GetFields();
+                if (fields.Any())
                 {
-                    foreach (var item in (Array)value)
+                    foreach (var field in fields)
                     {
-                        vals.Add(item);
-                    }
-                }
-                else
-                {
-                    var fields = valueType.GetFields();
-                    if (fields.Any())
-                    {
-                        foreach (var field in fields)
-                        {
-                            vals.Add(field.GetValue(value));
-                        }
+                        vals.Add(field.GetValue(value));
                     }
                 }
             }
 
-            return vals;
+            return vals?.Where(x => x != null);
         }
     }
 }

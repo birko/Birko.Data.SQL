@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Microsoft.Extensions.Primitives;
+using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.Common;
@@ -56,7 +57,7 @@ namespace Birko.Data.SQL.Connectors
 
         private object EscapeValue(object item)
         {
-            if(item is string)
+            if (item is string)
             {
                 return (item as string).Replace("'", "''");
             }
@@ -86,9 +87,16 @@ namespace Birko.Data.SQL.Connectors
             {
                 if (condition.SubConditions != null && condition.SubConditions.Any())
                 {
-                    result.Append("(");
+                    var count = condition.SubConditions.Count();
+                    if (count > 1)
+                    {
+                        result.Append("(");
+                    }
                     result.Append(ConditionDefinition(condition.SubConditions, command));
-                    result.Append(")");
+                    if (count > 1)
+                    {
+                        result.Append(")");
+                    }
                 }
                 else if (!string.IsNullOrEmpty(condition.Name))
                 {
@@ -96,11 +104,7 @@ namespace Birko.Data.SQL.Connectors
                     switch (condition.Type)
                     {
                         case Conditions.ConditionType.IsNull:
-                            if (condition.IsNot)
-                            {
-                                result.Append(" NOT ");
-                            }
-                            result.Append(" IS NULL");
+                            result.Append(condition.IsNot ? " IS NOT NULL" : " IS NULL");
                             break;
                         case Conditions.ConditionType.Less:
                             if (condition.IsNot)
@@ -256,15 +260,17 @@ namespace Birko.Data.SQL.Connectors
 
         public virtual string LimitOffsetDefinition(DbCommand command, int? limit = null, int? offset = null)
         {
+            if (limit == null)
+            {
+                return null;
+            }
             var result = new StringBuilder();
-            if (limit != null) {
-                result.Append(" LIMIT @LIMIT");
-                AddParameter(command, "@LIMIT", limit.Value);
-                if (offset != null)
-                {
-                    result.Append(" OFFSET @OFFSET");
-                    AddParameter(command, "@OFFSET", offset.Value);
-                }
+            result.Append(" LIMIT @LIMIT");
+            AddParameter(command, "@LIMIT", limit.Value);
+            if (offset != null)
+            {
+                result.Append(" OFFSET @OFFSET");
+                AddParameter(command, "@OFFSET", offset.Value);
             }
             return result.ToString();
         }
@@ -375,60 +381,67 @@ namespace Birko.Data.SQL.Connectors
             string? commandText = null;
             using (var command = db.CreateCommand())
             {
-                DbDataReader reader = null;
                 try
                 {
                     createCommand?.Invoke(command);
                     commandText = DataBase.GetGeneratedQuery(command);
-                    OnExecute?.Invoke(commandText);
-                    reader = command.ExecuteReader();
+                    OnExecute?.Invoke(command.CommandText);
                 }
                 catch (Exception ex)
                 {
                     InitException(ex, commandText);
-                    reader = null;
                 }
-                if (reader?.HasRows ?? false)
+                Console.WriteLine("--------");
+                Console.WriteLine(commandText);
+                using var reader = command.ExecuteReader();
+                if (!(reader?.HasRows ?? false))
                 {
-                    bool isNext = false;
+                    reader?.Close();
+                    db.Close();
+                    yield break;
+                }
+                bool isNext = false;
+                try
+                {
+                    isNext = reader.Read();
+                }
+                catch (Exception ex)
+                {
+                    InitException(ex, commandText);
+                    isNext = false;
+                    reader?.Close();
+                    db.Close();
+                    yield break;
+                }
+                while (isNext)
+                {
+                    IEnumerable<object> row = null;
+                    try
+                    {
+                        row = transformFunction.Invoke(reader);
+                    }
+                    catch (Exception ex)
+                    {
+                        InitException(ex, commandText);
+                    }
+                    if (row == null)
+                    {
+                        reader?.Close();
+                        db.Close();
+                        isNext = false;
+                        yield break;
+                    }
+                    yield return row;
                     try
                     {
                         isNext = reader.Read();
                     }
                     catch (Exception ex)
                     {
+                        reader?.Close();
+                        db.Close();
                         InitException(ex, commandText);
                         isNext = false;
-                    }
-                    while (isNext)
-                    {
-                        IEnumerable<object> row = null;
-                        try
-                        {
-                            row = transformFunction.Invoke(reader);
-                        }
-                        catch (Exception ex)
-                        {
-                            InitException(ex, commandText);
-                        }
-                        if (row != null)
-                        {
-                            yield return row;
-                            try
-                            {
-                                isNext = reader.Read();
-                            }
-                            catch (Exception ex)
-                            {
-                                InitException(ex, commandText);
-                                isNext = false;
-                            }
-                        }
-                        else 
-                        {
-                            isNext = false;
-                            break;
-                        }
                     }
                 }
                 reader?.Close();

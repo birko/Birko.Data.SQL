@@ -11,6 +11,7 @@ namespace Birko.Data.Stores
 
     public class DataBaseStore<DB, T> 
         : AbstractStore<T>
+        , ISettingsStore<ISettings>
         , ISettingsStore<PasswordSettings>
         where T : Models.AbstractModel
         where DB : AbstractConnector
@@ -23,6 +24,11 @@ namespace Birko.Data.Stores
         }
 
         public virtual void SetSettings(PasswordSettings settings)
+        {
+            SetSettings((ISettings)settings);
+        }
+
+        public virtual void SetSettings(ISettings settings)
         {
             if (settings is PasswordSettings sets)
             {
