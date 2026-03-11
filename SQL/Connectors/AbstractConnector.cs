@@ -1,4 +1,3 @@
-﻿using Microsoft.Extensions.Primitives;
 using System;
 using System.Collections.Generic;
 using System.Data;
@@ -6,6 +5,8 @@ using System.Data.Common;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Text;
+using Birko.Data.SQL.Connectors.Strategies;
+using PasswordSettings = Birko.Data.Stores.PasswordSettings;
 
 namespace Birko.Data.SQL.Connectors
 {
@@ -13,31 +14,22 @@ namespace Birko.Data.SQL.Connectors
     public delegate void OnException(Exception ex, string commandText);
     public delegate void OnExecute(string commandText);
 
-    public abstract partial class AbstractConnector
+    public abstract partial class AbstractConnector : AbstractConnectorBase
     {
-        protected readonly Stores.PasswordSettings _settings = null;
         public event InitConnector OnInit;
         public event OnException OnException;
         public event OnExecute OnExecute;
 
-        public bool IsInit { get; private set; } = false;
-
-        public AbstractConnector(Stores.PasswordSettings settings)
+        public AbstractConnector(PasswordSettings settings) : base(settings)
         {
-            _settings = settings;
         }
 
-        public abstract DbConnection CreateConnection(Stores.PasswordSettings settings);
-
-        public abstract string ConvertType(DbType type, Fields.AbstractField field);
-
-        public abstract string FieldDefinition(Fields.AbstractField field);
 
         public virtual void InitException(Exception ex, string commandText)
         {
             if (OnException != null)
             {
-                OnException?.Invoke(ex, commandText);
+                OnException.Invoke(ex, commandText);
             }
             else
             {
@@ -47,271 +39,119 @@ namespace Birko.Data.SQL.Connectors
 
         public void DoInit()
         {
-            if (!IsInit)
+            if (!IsInitializing)
             {
-                IsInit = true;
+                IsInitializing = true;
                 OnInit?.Invoke(this);
-                IsInit = false;
+                IsInitializing = false;
             }
-        }
-
-        private object EscapeValue(object item)
-        {
-            if (item is string)
-            {
-                return (item as string).Replace("'", "''");
-            }
-            return item;
-        }
-
-        public virtual DbCommand AddParameter(DbCommand command, string name, object value)
-        {
-            if (command.Parameters.Contains(name))
-            {
-                command.Parameters[name].Value = value ?? DBNull.Value;
-            }
-            else
-            {
-                var parameter = command.CreateParameter();
-                parameter.ParameterName = name;
-                parameter.Value = value ?? DBNull.Value;
-                command.Parameters.Add(parameter);
-            }
-            return command;
-        }
-
-        public virtual string ConditionDefinition(Conditions.Condition condition, DbCommand command)
-        {
-            var result = new StringBuilder();
-            if (condition != null)
-            {
-                if (condition.SubConditions != null && condition.SubConditions.Any())
-                {
-                    var count = condition.SubConditions.Count();
-                    if (count > 1)
-                    {
-                        result.Append("(");
-                    }
-                    result.Append(ConditionDefinition(condition.SubConditions, command));
-                    if (count > 1)
-                    {
-                        result.Append(")");
-                    }
-                }
-                else if (!string.IsNullOrEmpty(condition.Name))
-                {
-                    result.Append(condition.Name);
-                    switch (condition.Type)
-                    {
-                        case Conditions.ConditionType.IsNull:
-                            result.Append(condition.IsNot ? " IS NOT NULL" : " IS NULL");
-                            break;
-                        case Conditions.ConditionType.Less:
-                            if (condition.IsNot)
-                            {
-                                result.Append(" >= ");
-                            }
-                            else
-                            {
-                                result.Append(" < ");
-                            }
-                            break;
-                        case Conditions.ConditionType.Greather:
-                            if (condition.IsNot)
-                            {
-                                result.Append(" <= ");
-                            }
-                            else
-                            {
-                                result.Append(" > ");
-                            }
-                            break;
-                        case Conditions.ConditionType.LessAndEqual:
-                            if (condition.IsNot)
-                            {
-                                result.Append(" > ");
-                            }
-                            else
-                            {
-                                result.Append(" <= ");
-                            }
-                            break;
-                        case Conditions.ConditionType.GreatherAndEqual:
-                            if (condition.IsNot)
-                            {
-                                result.Append(" < ");
-                            }
-                            else
-                            {
-                                result.Append(" >= ");
-                            }
-                            break;
-                        case Conditions.ConditionType.Like:
-                        case Conditions.ConditionType.EndsWith:
-                        case Conditions.ConditionType.StartsWith:
-                            if (condition.IsNot)
-                            {
-                                result.Append(" NOT ");
-                            }
-                            result.Append(" LIKE ");
-                            break;
-                        case Conditions.ConditionType.In:
-                            if (condition.IsNot)
-                            {
-                                result.Append(" NOT ");
-                            }
-                            result.Append(" IN ");
-                            break;
-                        case Conditions.ConditionType.Equal:
-                        default:
-                            if (condition.IsNot)
-                            {
-                                result.Append(" <> ");
-                            }
-                            else
-                            {
-                                result.Append(" = ");
-                            }
-                            break;
-                    }
-                    if (condition.Type != Conditions.ConditionType.IsNull)
-                    {
-                        if (condition.Type == Conditions.ConditionType.In)
-                        {
-                            int i = 0;
-                            result.Append("(");
-                            foreach (var item in condition.Values)
-                            {
-                                if (i > 0)
-                                {
-                                    result.Append(", ");
-                                }
-                                if (!condition.IsField)
-                                {
-                                    var value = EscapeValue(item);
-                                    var count = command.Parameters?.Count ?? 0;
-                                    result.Append("@WHERE" + condition.Name.Replace(".", string.Empty) + i + "_" + count);
-                                    AddParameter(command, "@WHERE" + condition.Name.Replace(".", string.Empty) + i + "_" + count, value);
-                                }
-                                i++;
-                            }
-                            result.Append(")");
-                        }
-                        else if (condition.Values != null)
-                        {
-                            var enumerator = condition.Values.GetEnumerator();
-                            if (enumerator.MoveNext())
-                            {
-                                var first = enumerator.Current;
-                                if (first != null)
-                                {
-                                    if (!condition.IsField)
-                                    {
-                                        object value = condition.Type switch
-                                        {
-                                            Conditions.ConditionType.StartsWith => (first as string) + "%",
-                                            Conditions.ConditionType.Like => "%" + (first as string) + "%",
-                                            Conditions.ConditionType.EndsWith => "%" + (first as string),
-                                            _ => first,
-                                        };
-                                        value = EscapeValue(value);
-                                        var count = command.Parameters?.Count ?? 0;
-                                        result.Append("@WHERE" + condition.Name.Replace(".", string.Empty) + "_" + count);
-                                        AddParameter(command, "@WHERE" + condition.Name.Replace(".", string.Empty) + "_" + count, value);
-                                    }
-                                    else
-                                    {
-                                        result.Append(first);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            return result.ToString();
-        }
-
-        public virtual string ConditionDefinition(IEnumerable<Conditions.Condition> conditions, DbCommand command)
-        {
-            var result = new StringBuilder();
-            if (conditions != null && conditions.Any())
-            {
-                int i = 0;
-                foreach (var condition in conditions)
-                {
-                    if (i > 0)
-                    {
-                        if (condition.IsOr)
-                        {
-                            result.Append(" OR ");
-                        }
-                        else
-                        {
-                            result.Append(" AND ");
-                        }
-                    }
-                    result.Append(ConditionDefinition(condition, command));
-                    i++;
-                }
-            }
-            return result.ToString();
-        }
-
-        public virtual string LimitOffsetDefinition(DbCommand command, int? limit = null, int? offset = null)
-        {
-            if (limit == null)
-            {
-                return null;
-            }
-            var result = new StringBuilder();
-            result.Append(" LIMIT @LIMIT");
-            AddParameter(command, "@LIMIT", limit.Value);
-            if (offset != null)
-            {
-                result.Append(" OFFSET @OFFSET");
-                AddParameter(command, "@OFFSET", offset.Value);
-            }
-            return result.ToString();
-        }
-
-        public virtual DbCommand AddWhere(IEnumerable<Conditions.Condition> conditions, DbCommand command)
-        {
-            if (command != null && conditions != null && conditions.Any())
-            {
-                command.CommandText += " WHERE ";
-                command.CommandText += ConditionDefinition(conditions, command);
-            }
-            return command;
         }
 
         public virtual void DoCommand(Action<DbCommand> createCommand, Action<DbCommand> executeCommand, bool isLock = false)
         {
+            if (ExternalConnection != null && ExternalTransaction != null)
+            {
+                RunCommandWithExternalTransaction(createCommand, executeCommand);
+                return;
+            }
             if (!isLock)
             {
                 RunCommand(createCommand, executeCommand);
             }
             else
             {
-                lock (_settings)
+                lock (_lock)
                 {
                     RunCommand(createCommand, executeCommand);
                 }
             }
         }
 
+        /// <summary>
+        /// External transaction context. When set, DoCommandWithTransaction and DoCommand
+        /// use this connection/transaction instead of creating their own.
+        /// </summary>
+        public DbConnection? ExternalConnection { get; private set; }
+        public DbTransaction? ExternalTransaction { get; private set; }
+
+        /// <summary>
+        /// Sets or clears the external transaction context.
+        /// When set, all operations participate in this transaction.
+        /// </summary>
+        public void SetExternalTransaction(DbConnection? connection, DbTransaction? transaction)
+        {
+            ExternalConnection = connection;
+            ExternalTransaction = transaction;
+        }
+
         public virtual void DoCommandWithTransaction(Action<DbCommand> createCommand, Action<DbCommand> executeCommand, bool isLock = false)
         {
+            if (ExternalConnection != null && ExternalTransaction != null)
+            {
+                RunCommandWithExternalTransaction(createCommand, executeCommand);
+                return;
+            }
             if (!isLock)
             {
                 RunCommandTransaction(createCommand, executeCommand);
             }
             else
             {
-                lock (_settings)
+                lock (_lock)
                 {
                     RunCommandTransaction(createCommand, executeCommand);
                 }
+            }
+        }
+
+        private IEnumerable<IEnumerable<object>> RunReaderCommandWithExternalTransaction(DbConnection connection, DbTransaction transaction, Action<DbCommand> createCommand, Func<DbDataReader, IEnumerable<object>> transformFunction)
+        {
+            string? commandText = null;
+            using (var command = connection.CreateCommand())
+            {
+                command.Transaction = transaction;
+                try
+                {
+                    createCommand?.Invoke(command);
+                    commandText = DataBase.GetGeneratedQuery(command);
+                    OnExecute?.Invoke(command.CommandText);
+                }
+                catch (Exception ex) { InitException(ex, commandText); }
+                using var reader = command.ExecuteReader();
+                if (!(reader?.HasRows ?? false)) yield break;
+                bool isNext = false;
+                try { isNext = reader.Read(); }
+                catch (Exception ex) { InitException(ex, commandText); yield break; }
+                while (isNext)
+                {
+                    IEnumerable<object> row = null;
+                    try { row = transformFunction.Invoke(reader); }
+                    catch (Exception ex) { InitException(ex, commandText); }
+                    if (row == null) yield break;
+                    yield return row;
+                    try { isNext = reader.Read(); }
+                    catch (Exception ex) { InitException(ex, commandText); isNext = false; }
+                }
+            }
+        }
+
+        private void RunCommandWithExternalTransaction(Action<DbCommand> createCommand, Action<DbCommand> executeCommand)
+        {
+            string commandText = null;
+            try
+            {
+                using (var command = ExternalConnection!.CreateCommand())
+                {
+                    command.Transaction = ExternalTransaction;
+                    createCommand?.Invoke(command);
+                    commandText = DataBase.GetGeneratedQuery(command);
+                    OnExecute?.Invoke(commandText);
+                    executeCommand?.Invoke(command);
+                }
+            }
+            catch (Exception ex)
+            {
+                InitException(ex, commandText);
             }
         }
 
@@ -376,6 +216,14 @@ namespace Birko.Data.SQL.Connectors
                 throw new ArgumentNullException(nameof(transformFunction));
             }
 
+            // Use external transaction's connection if available
+            if (ExternalConnection != null && ExternalTransaction != null)
+            {
+                foreach (var item in RunReaderCommandWithExternalTransaction(ExternalConnection, ExternalTransaction, createCommand, transformFunction))
+                    yield return item;
+                yield break;
+            }
+
             using var db = CreateConnection(_settings);
             db.Open();
             string? commandText = null;
@@ -391,13 +239,9 @@ namespace Birko.Data.SQL.Connectors
                 {
                     InitException(ex, commandText);
                 }
-                Console.WriteLine("--------");
-                Console.WriteLine(commandText);
                 using var reader = command.ExecuteReader();
                 if (!(reader?.HasRows ?? false))
                 {
-                    reader?.Close();
-                    db.Close();
                     yield break;
                 }
                 bool isNext = false;
@@ -408,9 +252,6 @@ namespace Birko.Data.SQL.Connectors
                 catch (Exception ex)
                 {
                     InitException(ex, commandText);
-                    isNext = false;
-                    reader?.Close();
-                    db.Close();
                     yield break;
                 }
                 while (isNext)
@@ -426,9 +267,6 @@ namespace Birko.Data.SQL.Connectors
                     }
                     if (row == null)
                     {
-                        reader?.Close();
-                        db.Close();
-                        isNext = false;
                         yield break;
                     }
                     yield return row;
@@ -438,15 +276,11 @@ namespace Birko.Data.SQL.Connectors
                     }
                     catch (Exception ex)
                     {
-                        reader?.Close();
-                        db.Close();
                         InitException(ex, commandText);
                         isNext = false;
                     }
                 }
-                reader?.Close();
             }
-            db.Close();
         }
     }
 }

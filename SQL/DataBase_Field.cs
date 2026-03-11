@@ -1,5 +1,6 @@
 ﻿using Birko.Data.SQL.Fields;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Data.Common;
 using System.Linq;
@@ -11,36 +12,26 @@ namespace Birko.Data.SQL
 {
     public static partial class DataBase
     {
-        private static Dictionary<Type, IEnumerable<Fields.AbstractField>> _fieldsCache = null;
+        internal static readonly ConcurrentDictionary<Type, IEnumerable<Fields.AbstractField>> _fieldsCache = new();
 
         private static IEnumerable<AbstractField> LoadFields(Type type)
         {
-            if (_fieldsCache == null)
-            {
-                _fieldsCache = new Dictionary<Type, IEnumerable<Fields.AbstractField>>();
-            }
-            if (!_fieldsCache.ContainsKey(type))
+            return _fieldsCache.GetOrAdd(type, t =>
             {
                 List<AbstractField> list = new List<AbstractField>();
-                GetProperties(type, (field) =>
+                GetProperties(t, (field) =>
                 {
                     list.AddRange(LoadField(field));
                 });
-                _fieldsCache.Add(type, list.ToArray());
-            }
-            return _fieldsCache[type];
+                return list.ToArray();
+            });
         }
 
         public static IEnumerable<AbstractField> LoadField(PropertyInfo field)
         {
-            List<AbstractField> list = new List<AbstractField>();
-            Attributes.Field[] fieldAttrs = (Attributes.Field[])field.GetCustomAttributes(typeof(Attributes.Field), true);
+            Birko.Data.Attributes.Field[] fieldAttrs = (Birko.Data.Attributes.Field[])field.GetCustomAttributes(typeof(Birko.Data.Attributes.Field), true);
             var tableField = Fields.AbstractField.CreateAbstractField(field, fieldAttrs);
-            if (tableField != null)
-            {
-                list.Add(tableField);
-            }
-            return list.ToArray();
+            return tableField != null ? new[] { tableField } : Array.Empty<AbstractField>();
         }
 
         public static AbstractField GetField<T, P>(Expression<Func<T, P>> expr)
@@ -48,11 +39,15 @@ namespace Birko.Data.SQL
             PropertyInfo propInfo = null;
             if (expr.Body is UnaryExpression expression)
             {
-                propInfo = (expression.Operand as MemberExpression).Member as PropertyInfo;
+                propInfo = (expression.Operand as MemberExpression)?.Member as PropertyInfo;
             }
-            else if(expr.Body is  MemberExpression memberExpression)
+            else if(expr.Body is MemberExpression memberExpression)
             {
                 propInfo = memberExpression.Member as PropertyInfo;
+            }
+            if (propInfo == null)
+            {
+                throw new ArgumentException($"Unable to resolve property from expression: {expr}", nameof(expr));
             }
             if (propInfo.ReflectedType == typeof(Models.AbstractLogModel))
             {
@@ -69,7 +64,7 @@ namespace Birko.Data.SQL
         public static IEnumerable<AbstractField> GetPrimaryFields(Type type)
         {
             var table = LoadTable(type);
-            return table?.GetPrimaryFields() ?? new AbstractField[0];
+            return table?.GetPrimaryFields() ?? Array.Empty<AbstractField>();
         }
 
         public static int Read(IEnumerable<Fields.AbstractField> fields, DbDataReader reader, object data, int index = 0)

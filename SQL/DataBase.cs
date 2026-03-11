@@ -6,28 +6,48 @@ using System.Data.Common;
 using System.Linq.Expressions;
 using System.Reflection;
 using System.Text;
+using System.Collections.Concurrent;
+using System.Data;
+using Settings = Birko.Data.Stores.Settings;
 
 namespace Birko.Data.SQL
 {
     public static partial class DataBase
     {
-        private static Dictionary<Type, Dictionary<string, AbstractConnector>> _connectors = null;
-
-        public static AbstractConnector GetConnector<T>(Stores.Settings settings) where T: AbstractConnector
+        private static readonly ConcurrentDictionary<Type, ConcurrentDictionary<string, AbstractConnector>> _connectors = new();
+        private static readonly ConcurrentDictionary<Type, ConcurrentDictionary<string, AbstractAsyncConnector>> _asyncConnectors = new();
+        private static readonly ConcurrentDictionary<string, Func<object>> _expressionCache = new();
+        private static readonly HashSet<DbType> _stringTypes = new()
         {
-            if (_connectors == null)
+            DbType.Guid,
+            DbType.String,
+            DbType.StringFixedLength,
+            DbType.AnsiString,
+            DbType.AnsiStringFixedLength
+        };
+
+        public static AbstractConnector GetConnector<T>(Settings settings) where T : AbstractConnector
+        {
+            var connectorType = typeof(T);
+            var settingsId = settings.GetId();
+
+            var connectorDict = _connectors.GetOrAdd(connectorType, _ => new ConcurrentDictionary<string, AbstractConnector>());
+            return connectorDict.GetOrAdd(settingsId, id =>
             {
-                _connectors = new Dictionary<Type, Dictionary<string, AbstractConnector>>();
-            }
-            if (!_connectors.ContainsKey(typeof(T)))
+                return (AbstractConnector)Activator.CreateInstance(typeof(T), new object[] { settings });
+            });
+        }
+
+        public static AbstractAsyncConnector GetAsyncConnector<T>(Settings settings) where T : AbstractAsyncConnector
+        {
+            var connectorType = typeof(T);
+            var settingsId = settings.GetId();
+
+            var connectorDict = _asyncConnectors.GetOrAdd(connectorType, _ => new ConcurrentDictionary<string, AbstractAsyncConnector>());
+            return connectorDict.GetOrAdd(settingsId, id =>
             {
-                _connectors.Add(typeof(T), new Dictionary<string, AbstractConnector>());
-            }
-            if (!_connectors[typeof(T)].ContainsKey(settings.GetId()))
-            {
-                _connectors[typeof(T)].Add(settings.GetId(), (AbstractConnector)Activator.CreateInstance(typeof(T), new object[] { settings }));
-            }
-            return _connectors[typeof(T)][settings.GetId()];
+                return (AbstractAsyncConnector)Activator.CreateInstance(typeof(T), new object[] { settings });
+            });
         }
 
         private static void GetProperties(Type type, Action<PropertyInfo> action)
@@ -44,24 +64,17 @@ namespace Birko.Data.SQL
 
         public static string GetGeneratedQuery(DbCommand dbCommand)
         {
-            var stringTypes = new[] {
-                System.Data.DbType.Guid,
-                System.Data.DbType.String,
-                System.Data.DbType.StringFixedLength,
-                System.Data.DbType.AnsiString,
-                System.Data.DbType.AnsiStringFixedLength,
-            };
-            var query = dbCommand.CommandText;
+            var query = new StringBuilder(dbCommand.CommandText);
             foreach (DbParameter parameter in dbCommand.Parameters)
             {
-                bool isString = stringTypes.Contains(parameter.DbType);
+                bool isString = _stringTypes.Contains(parameter.DbType);
                 string value = isString
                         ? "'" + parameter.Value?.ToString() + "'"
                         : parameter.Value?.ToString();
-                query = query.Replace(parameter.ParameterName, value);
+                query.Replace(parameter.ParameterName, value);
             }
 
-            return query;
+            return query.ToString();
         }
 
         public static Conditions.Condition CreateCondition(AbstractField field, object value)
@@ -476,19 +489,53 @@ namespace Birko.Data.SQL
             return Array.Empty<Condition>();
         }
 
-        private static IEnumerable<object> InvokeExpression(Expression expr)
+        private static object? EvaluateExpression(Expression expr)
         {
-            object value;
-            if (expr is ConstantExpression constantExpression)
+            if (expr is ConstantExpression c)
+                return c.Value;
+
+            if (expr is MemberExpression m)
             {
-                value = constantExpression.Value;
-            }
-            else
-            {
-                var f = Expression.Lambda(expr).Compile();
-                value = f.DynamicInvoke();
+                object? container = null;
+                if (m.Expression != null)
+                {
+                    container = EvaluateExpression(m.Expression);
+                }
+
+                if (m.Member is FieldInfo fi)
+                    return fi.GetValue(container);
+                if (m.Member is PropertyInfo pi)
+                    return pi.GetValue(container);
             }
 
+            if (expr is NewArrayExpression na && na.NodeType == ExpressionType.NewArrayInit)
+            {
+                var elementType = na.Type.GetElementType();
+                if (elementType == null)
+                    return null;
+
+                var list = Array.CreateInstance(elementType, na.Expressions.Count);
+                for (int i = 0; i < na.Expressions.Count; i++)
+                {
+                    list.SetValue(EvaluateExpression(na.Expressions[i]), i);
+                }
+                return list;
+            }
+
+            // Use expression string as cache key (Expression doesn't implement GetHashCode/Equals)
+            var cacheKey = expr.ToString();
+            var func = _expressionCache.GetOrAdd(cacheKey, _ =>
+            {
+                var lambda = Expression.Lambda(expr);
+                return (Func<object>)lambda.Compile();
+            });
+
+            return func();
+        }
+
+        private static IEnumerable<object>? InvokeExpression(Expression expr)
+        {
+            object? value = EvaluateExpression(expr);
             if (value == null)
             {
                 return null;

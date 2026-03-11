@@ -8,19 +8,9 @@ namespace Birko.Data.SQL.Connectors
 {
     public abstract partial class AbstractConnector
     {
-        public void AlterTableDrop(Type type, Fields.AbstractField field)
-        {
-            AlterTableDrop(type, new[] { field });
-        }
-
         public void AlterTableDrop(Type type, IEnumerable<Fields.AbstractField> fields)
         {
             AlterTableDrop(DataBase.LoadTable(type), fields);
-        }
-
-        public void AlterTableDrop(Tables.Table table, Fields.AbstractField field)
-        {
-            AlterTableDrop(table, new[] { field });
         }
 
         public void AlterTableDrop(Tables.Table table, IEnumerable<Fields.AbstractField> fields)
@@ -39,7 +29,7 @@ namespace Birko.Data.SQL.Connectors
                 {
                     DoCommandWithTransaction((command) => {
                         command.CommandText = "ALTER TABLE "
-                            + tableName
+                            + QuoteIdentifier(tableName)
                             + " DROP COLUMN "
                             + field.Name;
                     }, (command) => {

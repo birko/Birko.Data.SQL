@@ -31,11 +31,6 @@ namespace Birko.Data.SQL.Connectors
             Update(DataBase.LoadTable(type), model, conditions);
         }
 
-        public void Update(Tables.Table table, object model, LambdaExpression expr)
-        {
-            Update(table, model, DataBase.ParseConditionExpression(expr));
-        }
-
         public void Update(Tables.Table table, object model, IEnumerable<Conditions.Condition> conditions = null)
         {
             if (model != null)
@@ -64,16 +59,6 @@ namespace Birko.Data.SQL.Connectors
         {
             var table = DataBase.LoadTable(type);
             Update(table, expresions, conditions);
-        }
-
-        public void Update<T, P>(Tables.Table table, IDictionary<Expression<Func<T, P>>, object> expresions, Expression expr)
-        {
-            Update(table, expresions, DataBase.ParseConditionExpression(expr));
-        }
-
-        public void Update<T, P>(Tables.Table table, IDictionary<Expression<Func<T, P>>, Expression<Func<T, P>>> expresions, Expression expr)
-        {
-            Update(table, expresions, DataBase.ParseConditionExpression(expr));
         }
 
         public void Update<T, P>(Tables.Table table, IDictionary<Expression<Func<T, P>>, object> expresions, IEnumerable<Conditions.Condition> conditions = null)
@@ -134,7 +119,7 @@ namespace Birko.Data.SQL.Connectors
             if (values != null && values.Any())
             {
                 DoCommandWithTransaction((command) => {
-                    command.CommandText = "UPDATE " + tableName + " SET ";
+                    command.CommandText = "UPDATE " + QuoteIdentifier(tableName) + " SET ";
                     if (!isExpressionValues)
                     {
                         command.CommandText += string.Join(", ", fields.Values.Select(x => x + "= @SET" + x.Replace(".", string.Empty)));

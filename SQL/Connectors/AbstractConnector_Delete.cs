@@ -18,26 +18,16 @@ namespace Birko.Data.SQL.Connectors
             Delete(DataBase.LoadTable(type), conditions);
         }
 
-        public void Delete(Tables.Table table, LambdaExpression expr)
-        {
-            Delete(table, DataBase.ParseConditionExpression(expr));
-        }
-
         public void Delete(Tables.Table table, IEnumerable<Conditions.Condition> conditions = null)
         {
             var tableName = table.Name;
             Delete(tableName, conditions);
         }
 
-        public void Delete(string tableName, LambdaExpression expr)
-        {
-            Delete(tableName, DataBase.ParseConditionExpression(expr));
-        }
-
         private void Delete(string tableName, IEnumerable<Conditions.Condition> conditions = null)
         {
             DoCommandWithTransaction((command) => {
-                command.CommandText = "DELETE FROM " + tableName;
+                command.CommandText = "DELETE FROM " + QuoteIdentifier(tableName);
                 AddWhere(conditions, command);
             }, (command) => {
                 command.ExecuteNonQuery();

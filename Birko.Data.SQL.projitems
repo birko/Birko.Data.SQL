@@ -11,12 +11,21 @@
   <ItemGroup>
     <Compile Include="$(MSBuildThisFileDirectory)Attributes\Field.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Attributes\Table.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Extensions\IDataBaseRepository.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Repositories\DataBaseBulkRepository.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Repositories\IDataBaseRepository.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Conditions\Condition.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Conditions\Join.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\AbstractAsyncConnector.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\AbstractAsyncConnector_Alter_Add.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\AbstractAsyncConnector_Alter_Drop.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\AbstractAsyncConnector_Create.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\AbstractAsyncConnector_Delete.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\AbstractAsyncConnector_Drop.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\AbstractAsyncConnector_Insert.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\AbstractAsyncConnector_Select.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\AbstractAsyncConnector_SelectCount.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\AbstractAsyncConnector_Update.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\AbstractConnector.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\AbstractConnectorBase.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\AbstractConnector_Alter_Add.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\AbstractConnector_Alter_Drop.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\AbstractConnector_Create.cs" />
@@ -26,6 +35,13 @@
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\AbstractConnector_Select.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\AbstractConnector_SelectCount.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\AbstractConnector_Update.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\IConditionStrategy.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\SqlBuilderContext.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\Strategies\ComparisonConditionStrategy.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\Strategies\EqualConditionStrategy.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\Strategies\InConditionStrategy.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\Strategies\LikeConditionStrategy.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\Strategies\NullConditionStrategy.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\DataBase.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\DataBase_Field.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\DataBase_Table.cs" />
@@ -42,8 +58,18 @@
     <Compile Include="$(MSBuildThisFileDirectory)Exceptions\TableAttributeException.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Models\AbstractLogModel.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Models\AbstractModel.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Models\AbstractDatabasePercentage.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Models\AbstractDatabaseTree.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Models\DatabaseValueData.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Repositories\DataBaseRepository.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Stores\DataBaseBulkStore.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Repositories\AsyncDataBaseRepository.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Repositories\DataBaseModelRepository.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Repositories\AsyncDataBaseModelRepository.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Stores\DataBaseStore.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Stores\DataBaseBulkStore.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Stores\AsyncDataBaseStore.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Stores\AsyncDataBaseBulkStore.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Stores\SqlTransactionContext.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)UnitOfWork\SqlUnitOfWork.cs" />
   </ItemGroup>
 </Project>

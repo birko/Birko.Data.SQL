@@ -8,19 +8,9 @@ namespace Birko.Data.SQL.Connectors
 {
     public abstract partial class AbstractConnector
     {
-        public void AlterTableAdd(Type type, Fields.AbstractField field)
-        {
-            AlterTableAdd(type, new[] { field });
-        }
-
         public void AlterTableAdd(Type type, IEnumerable<Fields.AbstractField> fields)
         {
             AlterTableAdd(DataBase.LoadTable(type), fields);
-        }
-
-        public void AlterTableAdd(Tables.Table table, Fields.AbstractField field)
-        {
-            AlterTableAdd(table, new[] { field });
         }
 
         public void AlterTableAdd(Tables.Table table, IEnumerable<Fields.AbstractField> fields)
@@ -39,7 +29,7 @@ namespace Birko.Data.SQL.Connectors
                 {
                     DoCommandWithTransaction((command) => {
                         command.CommandText = "ALTER TABLE "
-                            + tableName
+                            + QuoteIdentifier(tableName)
                             + " ADD COLUMN "
                             + FieldDefinition(field);
                     },  (command) => {

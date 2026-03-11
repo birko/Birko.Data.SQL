@@ -8,16 +8,6 @@ namespace Birko.Data.SQL.Connectors
 {
     public abstract partial class AbstractConnector
     {
-        public void DropTable(Type type)
-        {
-            DropTable(new[] { type });
-        }
-
-        public void DropTable(Tables.Table table)
-        {
-            DropTable(new[] { table.Name });
-        }
-
         public void DropTable(Type[] types)
         {
             DropTable(DataBase.LoadTables(types));
@@ -38,7 +28,7 @@ namespace Birko.Data.SQL.Connectors
                 foreach (var tableName in tables.Where(x => !string.IsNullOrEmpty(x)))
                 {
                     DoCommandWithTransaction((command) => {
-                        command.CommandText = "DROP TABLE IF EXISTS " + tableName;
+                        command.CommandText = "DROP TABLE IF EXISTS " + QuoteIdentifier(tableName);
                     }, (command) => {
                         command.ExecuteNonQuery();
                     }, true);

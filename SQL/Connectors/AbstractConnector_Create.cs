@@ -8,19 +8,9 @@ namespace Birko.Data.SQL.Connectors
 {
     public abstract partial class AbstractConnector
     {
-        public void CreateTable(Type type)
-        {
-            CreateTable(new[] { type });
-        }
-
         public void CreateTable(Type[] types)
         {
             CreateTable(DataBase.LoadTables(types));
-        }
-
-        public void CreateTable(Tables.Table table)
-        {
-            CreateTable(new[] { table });
         }
 
         public void CreateTable(IEnumerable<Tables.Table> tables)
@@ -29,13 +19,6 @@ namespace Birko.Data.SQL.Connectors
             {
                 CreateTable(tables.ToDictionary(x => x.Name, x => x.Fields.Select(y => y.Value)));
             }
-        }
-
-        public void CreateTable(string tableName, IEnumerable<Fields.AbstractField> fields)
-        {
-            CreateTable(new Dictionary<string, IEnumerable<Fields.AbstractField>>() {
-                { tableName, fields }
-            });
         }
 
         public void CreateTable(IDictionary<string, IEnumerable<Fields.AbstractField>> tables)
@@ -54,7 +37,7 @@ namespace Birko.Data.SQL.Connectors
             DoCommandWithTransaction((command) =>
             {
                 command.CommandText = "CREATE TABLE IF NOT EXISTS "
-                    + name
+                    + QuoteIdentifier(name)
                     + " ("
                     + string.Join(", ", fields.Where(x => !string.IsNullOrEmpty(x)))
                     + ")";

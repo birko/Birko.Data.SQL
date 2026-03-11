@@ -1,35 +1,38 @@
-﻿using Birko.Data.Filters;
+﻿using Birko.Data.Stores;
 using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Linq.Expressions;
-using System.Text;
-using static System.Runtime.InteropServices.JavaScript.JSType;
 
 namespace Birko.Data.Repositories
 {
-    public abstract class DataBaseRepository<TConnector, TViewModel, TModel> 
-        : AbstractStoreRepository<TViewModel, TModel>
+    public abstract class DataBaseRepository<TConnector, TViewModel, TModel>
+        : AbstractBulkViewModelRepository<TViewModel, TModel>
         , IDataBaseRepository<TConnector, TViewModel, TModel>
         where TConnector : SQL.Connectors.AbstractConnector
         where TModel : Models.AbstractModel, Models.ILoadable<TViewModel>
         where TViewModel : Models.ILoadable<TModel>
     {
+        /// <summary>
+        /// Gets the database connector from the (potentially wrapped) store.
+        /// This works with tenant wrappers and other store wrappers.
+        /// </summary>
+        public TConnector Connector => Store?.GetUnwrappedStore<TModel, DataBaseBulkStore<TConnector, TModel>>()?.Connector;
 
-        public DataBaseRepository(): base ()
+        public DataBaseRepository()
+            : this(new DataBaseBulkStore<TConnector, TModel>())
         {
         }
 
-        public override void SetSettings(Stores.ISettings settings)
+        public DataBaseRepository(IStore<TModel>? store) : base(null)
         {
-            if (settings is Stores.PasswordSettings setts)
+            if (store != null && !store.IsStoreOfType<TModel, DataBaseBulkStore<TConnector, TModel>>())
             {
-                base.SetSettings(setts);
-                Store = Stores.StoreLocator.GetStore<Stores.DataBaseStore<TConnector, TModel>, Stores.ISettings>(setts);
-                AddOnInit((connector) =>
-                {
-                    connector.CreateTable(new[] { typeof(TModel) });
-                });
+                throw new ArgumentException(
+                    "Store must be of type DataBaseBulkStore<TConnector, TModel> or a wrapper around it (e.g., TenantStoreWrapper).",
+                    nameof(store));
+            }
+            // Set the store after validation - base constructor handles null by creating default
+            if (store != null)
+            {
+                Store = store;
             }
         }
 
@@ -37,7 +40,8 @@ namespace Birko.Data.Repositories
         {
             if (Store != null && onInit != null)
             {
-                (Store as Stores.DataBaseStore<TConnector, TModel>)?.AddOnInit(onInit);
+                var innerStore = Store.GetUnwrappedStore<TModel, DataBaseBulkStore<TConnector, TModel>>();
+                innerStore?.AddOnInit(onInit);
             }
         }
 
@@ -45,11 +49,10 @@ namespace Birko.Data.Repositories
         {
             if (Store != null && onInit != null)
             {
-                (Store as Stores.DataBaseStore<TConnector, TModel>)?.RemoveOnInit(onInit);
+                var innerStore = Store.GetUnwrappedStore<TModel, DataBaseBulkStore<TConnector, TModel>>();
+                innerStore?.RemoveOnInit(onInit);
             }
         }
-
-        public TConnector Connector => (Store as Stores.DataBaseStore<TConnector, TModel>)?.Connector;
 
         /*
 

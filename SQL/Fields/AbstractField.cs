@@ -56,7 +56,7 @@ namespace Birko.Data.SQL.Fields
             return false; // value-type
         }
 
-        public static AbstractField CreateAbstractField(System.Reflection.PropertyInfo property, Attributes.Field[] fields = null)
+        public static AbstractField CreateAbstractField(System.Reflection.PropertyInfo property, Birko.Data.Attributes.Field[] fields = null)
         {
             var isNullable = IsNullable(property.PropertyType);
             string name = property.Name;
@@ -70,28 +70,28 @@ namespace Birko.Data.SQL.Fields
             {
                 foreach (var field in fields.Where(x => x != null))
                 {
-                    if (field is Attributes.NamedField namedfield)
+                    if (field is Birko.Data.Attributes.NamedField namedfield)
                     {
                         name = !string.IsNullOrEmpty(namedfield.Name) ? namedfield.Name : name;
                     }
 
-                    if (field is Attributes.PrimaryField)
+                    if (field is Birko.Data.Attributes.PrimaryField)
                     {
                         primary = true;
                     }
-                    if (field is Attributes.UniqueField)
+                    if (field is Birko.Data.Attributes.UniqueField)
                     {
                         unique = true;
                     }
-                    if (field is Attributes.IncrementField)
+                    if (field is Birko.Data.Attributes.IncrementField)
                     {
                         autoincrement = true;
                     }
-                    if (field is Attributes.PrecisionField precisionField)
+                    if (field is Birko.Data.Attributes.PrecisionField precisionField)
                     {
                         precision = precisionField.Precision;
                     }
-                    if (field is Attributes.ScaleField scaleField)
+                    if (field is Birko.Data.Attributes.ScaleField scaleField)
                     {
                         scale = scaleField.Scale;
                     }

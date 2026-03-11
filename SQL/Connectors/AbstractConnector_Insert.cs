@@ -61,7 +61,7 @@ namespace Birko.Data.SQL.Connectors
                 var first = values.First();
                 DoCommandWithTransaction((command) =>
                 {
-                    command.CommandText = "INSERT INTO " + tableName
+                    command.CommandText = "INSERT INTO " + QuoteIdentifier(tableName)
                                 + " (" + string.Join(", ", first.Keys) + ")"
                                 + " VALUES"
                                 + " (" + string.Join(", ", first.Keys.Select(x => "@" + x.Replace(".", string.Empty))) + ")";

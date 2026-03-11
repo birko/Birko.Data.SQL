@@ -29,29 +29,9 @@ namespace Birko.Data.SQL.Connectors
             return (types != null) ? SelectCount(types.Select(x => DataBase.LoadTable(x)), conditions) : 0;
         }
 
-        public long SelectCount(Tables.Table table, LambdaExpression expr)
-        {
-            return SelectCount(new[] { table }, expr);
-        }
-
-        public long SelectCount(IEnumerable<Tables.Table> tables, LambdaExpression expr)
-        {
-            return SelectCount(tables, (expr != null) ? DataBase.ParseConditionExpression(expr) : null);
-        }
-
-        public long SelectCount(Tables.Table table, IEnumerable<Conditions.Condition>? conditions = null)
-        {
-            return SelectCount(new[] { table.Name }, conditions);
-        }
-
         public long SelectCount(IEnumerable<Tables.Table> tables, IEnumerable<Conditions.Condition>? conditions = null)
         {
             return (tables != null) ? SelectCount(tables.Select(x => x.Name), conditions) : 0;
-        }
-
-        public long SelectCount(string tableName, IEnumerable<Conditions.Condition>? conditions = null)
-        {
-            return SelectCount(new[] { tableName }, conditions);
         }
 
         public long SelectCount(IEnumerable<string> tableNames, IEnumerable<Conditions.Condition>? conditions = null)
@@ -76,7 +56,7 @@ namespace Birko.Data.SQL.Connectors
                 }, (command) =>
                 {
                     var data = command.ExecuteScalar();
-                    count = Convert.ToInt64(command.ExecuteScalar());
+                    count = data != null ? Convert.ToInt64(data) : 0;
                 });
             }
             return count;

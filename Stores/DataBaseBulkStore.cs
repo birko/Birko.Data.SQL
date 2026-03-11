@@ -1,90 +1,74 @@
-﻿using System;
+using Birko.Data.SQL.Connectors;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
-using System.Text;
-using Birko.Data.Attributes;
-using Birko.Data.SQL.Conditions;
-using Birko.Data.SQL.Connectors;
 
 namespace Birko.Data.Stores
 {
-
-    public class DataBaseBulkStore<DB, T> 
-        : DataBaseStore<DB,T>
-        , IBulkStore<T>
-        , ISettingsStore<PasswordSettings>
+    /// <summary>
+    /// Bulk database store that provides optimized bulk operations.
+    /// Extends <see cref="DataBaseStore{DB, T}"/> with bulk CRUD capabilities.
+    /// </summary>
+    /// <typeparam name="DB">The type of database connector, must inherit from <see cref="AbstractConnector"/>.</typeparam>
+    /// <typeparam name="T">The type of entity, must inherit from <see cref="Models.AbstractModel"/>.</typeparam>
+    public class DataBaseBulkStore<DB, T> : DataBaseStore<DB, T>, IBulkStore<T>
         where T : Models.AbstractModel
         where DB : AbstractConnector
     {
+        /// <summary>
+        /// Initializes a new instance of the DataBaseBulkStore class.
+        /// </summary>
         public DataBaseBulkStore()
+            : base()
         {
-
         }
 
-        public IEnumerable<T> Read(Expression<Func<T, bool>>? filter = null, int? limit = null, int? offset = null)
+        #region Bulk Read Operations
+
+        /// <inheritdoc />
+        public virtual IEnumerable<T> Read(Expression<Func<T, bool>>? filter = null, OrderBy<T>? orderBy = null, int? limit = null, int? offset = null)
         {
-            if (Connector == null)
-            {
-                yield break;
-            }
-            foreach (var item in Connector.Select(typeof(T), filter, null, limit, offset))
-            {
-                yield return (T)item;
-            }
+            return Connector?.Select(typeof(T), filter as LambdaExpression, orderBy?.ToDictionary(), limit, offset)?.OfType<T>() ?? Enumerable.Empty<T>();
         }
 
-        public void Create(IEnumerable<T> data, StoreDataDelegate<T>? storeDelegate = null)
+        /// <inheritdoc />
+        public virtual IEnumerable<T> Read()
         {
-            if (Connector == null)
-            {
-                return;
-            }
-
-            foreach (var item in data.Where(x => x != null))
-            {
-                item.Guid = Guid.NewGuid();
-                storeDelegate?.Invoke(item);
-                Connector.Insert(data);
-            }
+            return Read(null, null, null, null);
         }
 
-        public void Update(IEnumerable<T> data, StoreDataDelegate<T>? storeDelegate = null)
-        {
-            if (Connector == null)
-            {
-                return;
-            }
-            var primaryFields = SQL.DataBase.GetPrimaryFields(typeof(T));
+        #endregion
 
-            List<Condition> conditions = new();
-            foreach (var item in data.Where(x => x != null))
+        #region Bulk Write Operations
+
+        /// <inheritdoc />
+        public virtual void Create(IEnumerable<T> data, StoreDataDelegate<T>? storeDelegate = null)
+        {
+            foreach (var item in data)
             {
-                foreach (var field in primaryFields)
-                {
-                    conditions.Add(SQL.DataBase.CreateCondition(field, item));
-                }
-                storeDelegate?.Invoke(item);
-                Connector.Update(data, conditions);
+                Create(item, storeDelegate);
             }
         }
 
-        public void Delete(IEnumerable<T> data)
+        /// <inheritdoc />
+        public virtual void Update(IEnumerable<T> data, StoreDataDelegate<T>? storeDelegate = null)
         {
-            if (Connector == null)
+            foreach (var item in data)
             {
-                return;
-            }
-            var primaryFields = SQL.DataBase.GetPrimaryFields(typeof(T));
-            foreach (var item in data.Where(x => x != null))
-            {
-                List<Condition> conditions = new ();
-                foreach (var field in primaryFields)
-                {
-                    conditions.Add(SQL.DataBase.CreateCondition(field, item));
-                }
-                Connector?.Delete(typeof(T), conditions);
+                Update(item, storeDelegate);
             }
         }
+
+        /// <inheritdoc />
+        public virtual void Delete(IEnumerable<T> data)
+        {
+            foreach (var item in data)
+            {
+                Delete(item);
+            }
+        }
+
+        #endregion
     }
 }
