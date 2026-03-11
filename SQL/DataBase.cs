@@ -415,6 +415,7 @@ namespace Birko.Data.SQL
                         string name = string.Empty;
                         if (
                             exprType != null
+                            && memberExpression.Expression != null
                             && memberExpression.Expression.NodeType == ExpressionType.MemberAccess
                             && memberExpression.Member.ReflectedType != null
                             && Nullable.GetUnderlyingType(memberExpression.Member.ReflectedType) != null
@@ -426,6 +427,7 @@ namespace Birko.Data.SQL
                         }
                         if (
                             exprType != null
+                            && memberExpression.Expression != null
                             && memberExpression.Member.ReflectedType != null
                             && memberExpression.Member.ReflectedType.IsAssignableFrom(exprType)
                             && memberExpression.Expression.NodeType == ExpressionType.Parameter

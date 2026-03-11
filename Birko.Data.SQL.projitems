@@ -61,8 +61,6 @@
     <Compile Include="$(MSBuildThisFileDirectory)Models\AbstractDatabasePercentage.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Models\AbstractDatabaseTree.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Models\DatabaseValueData.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Repositories\DataBaseRepository.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Repositories\AsyncDataBaseRepository.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Repositories\DataBaseModelRepository.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Repositories\AsyncDataBaseModelRepository.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Stores\DataBaseStore.cs" />
