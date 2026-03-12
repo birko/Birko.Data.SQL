@@ -1,0 +1,80 @@
+# Birko.Data.SQL
+
+SQL-specific data access layer providing abstract base classes for SQL database operations in the Birko Framework.
+
+## Features
+
+- Abstract SQL store classes (sync and async, with bulk support)
+- Typed connector pattern for database connections
+- SQL attributes for table/column mapping
+- Repository base classes for SQL databases
+- Automatic connection management via Settings
+
+## Installation
+
+```bash
+dotnet add package Birko.Data.SQL
+```
+
+## Dependencies
+
+- Birko.Data
+- .NET 10.0
+
+## Usage
+
+```csharp
+using Birko.Data.SQL.Stores;
+
+public class CustomerStore : DataBaseStore<SqlConnection, Customer>, IStore<Customer>
+{
+    public override Guid Create(Customer item)
+    {
+        var cmd = Connector.CreateCommand();
+        cmd.CommandText = "INSERT INTO Customers (Id, Name) VALUES (@Id, @Name)";
+        cmd.Parameters.AddWithValue("@Id", item.Id);
+        cmd.Parameters.AddWithValue("@Name", item.Name);
+        cmd.ExecuteNonQuery();
+        return item.Id;
+    }
+}
+```
+
+## API Reference
+
+### Stores
+
+- **DataBaseStore\<DB,T\>** - Base sync SQL store with `Connector` property
+- **DataBaseBulkStore\<DB,T\>** - Extends with bulk operations
+- **AsyncDataBaseStore\<DB,T\>** - Base async SQL store
+- **AsyncDataBaseBulkStore\<DB,T\>** - Async with bulk operations
+
+### Repositories
+
+- **DataBaseRepository\<T,S,DB\>** - SQL repository base
+- **DataBaseBulkRepository\<T,S,DB\>** - Bulk repository
+- **AsyncDataBaseRepository\<T,S,DB\>** - Async repository
+- **AsyncDataBaseBulkRepository\<T,S,DB\>** - Async bulk repository
+
+### Attributes
+
+- **TableAttribute** - Maps entity to database table
+- **ColumnAttribute** - Maps property to table column
+- **PrimaryKeyAttribute** - Marks primary key column
+- **ForeignKeyAttribute** - Marks foreign key relationship
+
+### Settings
+
+Uses `RemoteSettings` for connection: `Server`, `Port`, `Database`, `UserName`, `Password`
+
+## Database Providers
+
+- [Birko.Data.SQL.MSSql](../Birko.Data.SQL.MSSql/) - SQL Server
+- [Birko.Data.SQL.PostgreSQL](../Birko.Data.SQL.PostgreSQL/) - PostgreSQL
+- [Birko.Data.SQL.MySQL](../Birko.Data.SQL.MySQL/) - MySQL
+- [Birko.Data.SQL.SqLite](../Birko.Data.SQL.SqLite/) - SQLite
+- [Birko.Data.TimescaleDB](../Birko.Data.TimescaleDB/) - TimescaleDB
+
+## License
+
+Part of the Birko Framework.
