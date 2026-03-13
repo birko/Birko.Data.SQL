@@ -1,11 +1,11 @@
 using Birko.Data.SQL.Connectors;
-using Birko.Data.SQL.Stores;
+using Birko.Data.Stores;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
 
-namespace Birko.Data.Stores
+namespace Birko.Data.SQL.Stores
 {
     /// <summary>
     /// Basic database store for single-item CRUD operations.

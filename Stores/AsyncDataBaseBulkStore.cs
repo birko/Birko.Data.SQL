@@ -1,4 +1,5 @@
 using Birko.Data.SQL.Connectors;
+using Birko.Data.Stores;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -6,7 +7,7 @@ using System.Linq.Expressions;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Birko.Data.Stores
+namespace Birko.Data.SQL.Stores
 {
     /// <summary>
     /// Async bulk database store that provides optimized bulk operations.

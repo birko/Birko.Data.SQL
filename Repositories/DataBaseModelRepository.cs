@@ -1,7 +1,9 @@
+using Birko.Data.Repositories;
+using Birko.Data.SQL.Stores;
 using Birko.Data.Stores;
 using System;
 
-namespace Birko.Data.Repositories
+namespace Birko.Data.SQL.Repositories
 {
     /// <summary>
     /// Synchronous SQL database repository for direct model access.

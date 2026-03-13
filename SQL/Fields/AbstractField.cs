@@ -63,8 +63,10 @@ namespace Birko.Data.SQL.Fields
             bool primary = false;
             bool unique = false;
             bool autoincrement = false;
+            bool required = false;
             int? scale = null;
             int? precision = null;
+            int? maxLength = null;
 
             if (fields != null && fields.Any())
             {
@@ -87,6 +89,14 @@ namespace Birko.Data.SQL.Fields
                     {
                         autoincrement = true;
                     }
+                    if (field is Birko.Data.SQL.Attributes.RequiredField)
+                    {
+                        required = true;
+                    }
+                    if (field is Birko.Data.SQL.Attributes.MaxLengthField maxLengthField)
+                    {
+                        maxLength = maxLengthField.MaxLength;
+                    }
                     if (field is Birko.Data.SQL.Attributes.PrecisionField precisionField)
                     {
                         precision = precisionField.Precision;
@@ -99,34 +109,37 @@ namespace Birko.Data.SQL.Fields
 
             }
 
+            // [RequiredField] overrides C# nullability — forces NOT NULL even for nullable types
+            var effectiveNotNull = !isNullable || required;
+
             if (property.PropertyType == typeof(bool) || property.PropertyType == typeof(bool?))
             {
-                return (!isNullable)
+                return (effectiveNotNull)
                         ? (AbstractField)new BooleanField(property, name, primary, unique)
                         : (AbstractField)new NullableBooleanField(property, name, primary, unique);
             }
             if (property.PropertyType == typeof(DateTime) || property.PropertyType == typeof(DateTime?))
             {
-                return (!isNullable)
+                return (effectiveNotNull)
                         ? (AbstractField)new DateTimeField(property, name, primary, unique)
                         : (AbstractField)new NullableDateTimeField(property, name, primary, unique);
             }
 
             if (property.PropertyType == typeof(decimal) || property.PropertyType == typeof(decimal?))
             {
-                return (!isNullable)
+                return (effectiveNotNull)
                         ? (AbstractField)new DecimalField(property, name, primary, unique, autoincrement, precision, scale)
                         : (AbstractField)new NullableDecimalField(property, name, primary, unique, autoincrement, precision, scale);
             }
             if (property.PropertyType == typeof(Guid) || property.PropertyType == typeof(Guid?))
             {
-                return (!isNullable)
+                return (effectiveNotNull)
                         ? (AbstractField)new GuidField(property, name, primary, unique)
                         : (AbstractField)new NullableGuidField(property, name, primary, unique);
             }
             if(property.PropertyType == typeof(int) || property.PropertyType == typeof(int?))
             {
-                return (!isNullable)
+                return (effectiveNotNull)
                         ? (AbstractField)new IntegerField(property, name, primary, unique, autoincrement)
                         : (AbstractField)new NullableIntegerField(property, name, primary, unique, autoincrement);
             }
@@ -137,14 +150,25 @@ namespace Birko.Data.SQL.Fields
 
             if (property.PropertyType == typeof(string))
             {
-                if (precision != null && precision > 0)
+                // MaxLengthField takes priority, fall back to PrecisionField for backwards compat
+                var length = (maxLength != null && maxLength > 0) ? maxLength : precision;
+
+                AbstractField stringField;
+                if (length != null && length > 0)
                 {
-                    return new CharField(property, name, primary, unique, precision);
+                    stringField = new CharField(property, name, primary, unique, length);
                 }
                 else
                 {
-                    return new StringField(property, name, primary, unique);
+                    stringField = new StringField(property, name, primary, unique);
                 }
+
+                if (required)
+                {
+                    stringField.IsNotNull = true;
+                }
+
+                return stringField;
             }
 
             throw new Exceptions.FieldAttributeException("No field attributes in type");

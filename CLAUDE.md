@@ -53,6 +53,8 @@ Extends AsyncDataBaseStore with async bulk operations.
 - `ColumnAttribute` - Marks property as table column
 - `PrimaryKeyAttribute` - Marks primary key column
 - `ForeignKeyAttribute` - Marks foreign key relationship
+- `RequiredField` - Forces NOT NULL even for nullable C# types
+- `MaxLengthField(int maxLength)` - Sets VARCHAR length for string fields (takes priority over PrecisionField)
 
 #### Models
 - `ColumnModel` - Represents a table column

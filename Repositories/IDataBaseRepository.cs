@@ -1,8 +1,9 @@
+using Birko.Data.Repositories;
 using System;
 using System.Collections.Generic;
 using System.Text;
 
-namespace Birko.Data.Repositories
+namespace Birko.Data.SQL.Repositories
 {
     /// <summary>
     /// Model-direct SQL database repository interface.

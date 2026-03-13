@@ -1,8 +1,10 @@
 using System;
-using Birko.Data.Stores;
+using Birko.Data.Repositories;
 using Birko.Data.SQL.Connectors;
+using Birko.Data.SQL.Stores;
+using Birko.Data.Stores;
 
-namespace Birko.Data.Repositories
+namespace Birko.Data.SQL.Repositories
 {
     /// <summary>
     /// Async database repository for direct model access with SQL-based storage.
@@ -14,7 +16,7 @@ namespace Birko.Data.Repositories
         /// <summary>
         /// Gets the database store.
         /// </summary>
-        public Data.Stores.AsyncDataBaseBulkStore<SQL.Connectors.AbstractConnector, T>? DataBaseStore =>
+        public AsyncDataBaseBulkStore<SQL.Connectors.AbstractConnector, T>? DataBaseStore =>
             Store?.GetUnwrappedStore<T, Stores.AsyncDataBaseBulkStore<SQL.Connectors.AbstractConnector, T>>();
 
         /// <summary>

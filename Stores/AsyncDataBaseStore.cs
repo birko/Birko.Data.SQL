@@ -1,12 +1,12 @@
 using Birko.Data.SQL.Connectors;
-using Birko.Data.SQL.Stores;
+using Birko.Data.Stores;
 using System;
 using System.Collections.Generic;
 using System.Linq.Expressions;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Birko.Data.Stores
+namespace Birko.Data.SQL.Stores
 {
     /// <summary>
     /// Async version of DataBaseStore for basic database operations.

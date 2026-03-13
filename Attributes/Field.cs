@@ -38,6 +38,21 @@ namespace Birko.Data.SQL.Attributes
     }
 
     [System.AttributeUsage(System.AttributeTargets.Property, Inherited = true)]
+    public class RequiredField : Field
+    {
+    }
+
+    [System.AttributeUsage(System.AttributeTargets.Property, Inherited = true)]
+    public class MaxLengthField : Field
+    {
+        public int MaxLength = 0;
+        public MaxLengthField(int maxLength = 0) : base()
+        {
+            MaxLength = maxLength;
+        }
+    }
+
+    [System.AttributeUsage(System.AttributeTargets.Property, Inherited = true)]
     public class PrecisionField : Field
     {
         public int Precision = 0;
