@@ -14,12 +14,12 @@ namespace Birko.Data.SQL.Conditions
 
     public class Join
     {
-        public string Left { get; set; }
-        public string Right { get; set; }
-        public IEnumerable<Condition> Conditions { get; set; }
+        public string Left { get; set; } = null!;
+        public string Right { get; set; } = null!;
+        public IEnumerable<Condition>? Conditions { get; set; }
         public JoinType JoinType { get; set; }
 
-        public Join(string left, string right, JoinType joinType = JoinType.Cross,  IEnumerable<Condition> conditions = null)
+        public Join(string left, string right, JoinType joinType = JoinType.Cross, IEnumerable<Condition>? conditions = null)
         {
             Left = left;
             Right = right;
@@ -27,7 +27,7 @@ namespace Birko.Data.SQL.Conditions
             JoinType = joinType;
         }
 
-        public static Join Create(string left, string right, JoinType joinType = JoinType.Cross, IEnumerable <Condition> conditions = null)
+        public static Join Create(string left, string right, JoinType joinType = JoinType.Cross, IEnumerable<Condition>? conditions = null)
         {
             return new Join(left, right, joinType, conditions);
         }
@@ -37,7 +37,7 @@ namespace Birko.Data.SQL.Conditions
             return new Join(left, right, joinType, new[] { condition });
         }
 
-        public Join AddConditions(IEnumerable<Condition> conditions)
+        public Join AddConditions(IEnumerable<Condition>? conditions)
         {
             if (conditions != null && conditions.Any())
             {

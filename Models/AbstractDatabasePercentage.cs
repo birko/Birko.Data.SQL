@@ -1,4 +1,4 @@
-using Birko.Data.Attributes;
+using Birko.Data.SQL.Attributes;
 
 namespace Birko.Models
 {

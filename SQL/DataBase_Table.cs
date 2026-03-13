@@ -39,14 +39,14 @@ namespace Birko.Data.SQL
         {
             return _tableCache.GetOrAdd(type, t =>
             {
-                IEnumerable<object> attrs = t.GetCustomAttributes(typeof(Birko.Data.Attributes.Table), true)
+                IEnumerable<object> attrs = t.GetCustomAttributes(typeof(Birko.Data.SQL.Attributes.Table), true)
                     .Concat(t.GetCustomAttributes(typeof(System.ComponentModel.DataAnnotations.Schema.TableAttribute), true));
                 if (attrs != null)
                 {
                     foreach (Attribute attr in attrs)
                     {
-                        string tableName = null;
-                        if (attr is Birko.Data.Attributes.Table birkoTable)
+                        string? tableName = null;
+                        if (attr is Birko.Data.SQL.Attributes.Table birkoTable)
                         {
                             tableName = birkoTable.Name;
                         }
@@ -72,7 +72,7 @@ namespace Birko.Data.SQL
                             }
                         }
                     }
-                    return null;
+                    return null!;
                 }
                 else
                 {

@@ -33,7 +33,7 @@ namespace Birko.Data.SQL.Connectors
             }
         }
 
-        public IEnumerable<object> Select(Type[] types, LambdaExpression expr, IDictionary<string, bool> orderFields = null, int? limit = null, int? offset = null)
+        public IEnumerable<object> Select(Type[] types, LambdaExpression expr, IDictionary<string, bool>? orderFields = null, int? limit = null, int? offset = null)
         {
             foreach (var item in Select(types, (expr != null) ? DataBase.ParseConditionExpression(expr) : null, orderFields, limit, offset))
             {
@@ -41,11 +41,11 @@ namespace Birko.Data.SQL.Connectors
             }
         }
 
-        public IEnumerable<object> Select(Type type, IEnumerable<Conditions.Condition>? conditions = null, IDictionary<string, bool> orderFields = null, int? limit = null, int? offset = null)
+        public IEnumerable<object> Select(Type type, IEnumerable<Conditions.Condition>? conditions = null, IDictionary<string, bool>? orderFields = null, int? limit = null, int? offset = null)
         {
             foreach (var items in Select(new[] { type }, conditions, orderFields, limit, offset))
             {
-                yield return items.FirstOrDefault();
+                yield return items.FirstOrDefault()!;
             }
         }
 
@@ -62,7 +62,7 @@ namespace Birko.Data.SQL.Connectors
                 List<object> objects = new();
                 foreach (var type in types)
                 {
-                    var data = Activator.CreateInstance(type, Array.Empty<object>());
+                    var data = Activator.CreateInstance(type, Array.Empty<object>())!;
                     index = DataBase.Read(reader, data, index);
                     objects.Add(data);
                 }
@@ -91,7 +91,7 @@ namespace Birko.Data.SQL.Connectors
                 }
             }
 
-            foreach (var item in Select(tables.Where(x => x != null).Select(x => x.Name), fields, (reader) => transformFunction?.Invoke(fields, reader) ?? null, conditions, orderFields, limit, offset))
+            foreach (var item in Select(tables.Where(x => x != null).Select(x => x.Name), fields, transformFunction != null ? (reader) => transformFunction(fields, reader) : null, conditions, orderFields, limit, offset))
             {
                 yield return item;
             }
@@ -114,7 +114,7 @@ namespace Birko.Data.SQL.Connectors
             }
             foreach(var item in RunReaderCommand((command) => {
                 command = CreateSelectCommand(command, tableNames.Where(x => !string.IsNullOrEmpty(x)).Distinct(), fields, conditions, orderFields, limit, offset);
-            }, transformFunction))
+            }, transformFunction!))
             { 
                 yield return item; 
             }

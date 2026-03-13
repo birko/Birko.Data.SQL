@@ -8,9 +8,9 @@ namespace Birko.Data.SQL.Tables
 {
     public class Table
     {
-        public string Name { get; set; }
-        public Dictionary<string, Fields.AbstractField> Fields { get; set; }
-        public Type Type { get; set; }
+        public string Name { get; set; } = null!;
+        public Dictionary<string, Fields.AbstractField> Fields { get; set; } = null!;
+        public Type Type { get; set; } = null!;
 
         public IDictionary<int, string> GetSelectFields(bool withName  = false, bool notAggregate = false)
         {
@@ -45,17 +45,17 @@ namespace Birko.Data.SQL.Tables
             return Fields?.Any(x => x.Value?.IsAggregate ?? false) ?? false;
         }
 
-        internal IEnumerable<Fields.AbstractField> GetPrimaryFields()
+        internal IEnumerable<Fields.AbstractField>? GetPrimaryFields()
         {
             return Fields?.Values.Where(x => x.IsPrimary);
         }
 
-        internal Fields.AbstractField GetField(string name)
+        internal Fields.AbstractField? GetField(string name)
         {
             return (Fields != null && Fields.Any() && Fields.ContainsKey(name)) ? Fields[name] : null;
         }
 
-        internal Fields.AbstractField GetFieldByPropertyName(string name)
+        internal Fields.AbstractField? GetFieldByPropertyName(string name)
         {
             return (Fields != null && Fields.Any() && Fields.Any(x=>x.Value.Property != null && x.Value.Property.Name == name))
                 ? Fields.FirstOrDefault(x => x.Value.Property != null && x.Value.Property.Name == name).Value

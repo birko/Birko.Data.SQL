@@ -36,16 +36,10 @@ namespace Birko.Data.Stores
             int? offset = null,
             CancellationToken ct = default)
         {
-            if (Connector == null)
-            {
-                return Enumerable.Empty<T>();
-            }
+            if (Connector == null) return Enumerable.Empty<T>();
 
             var results = await Task.Run(() => Connector.Select(typeof(T), filter as LambdaExpression, orderBy?.ToDictionary(), limit, offset), ct);
-            if (results == null)
-            {
-                return Enumerable.Empty<T>();
-            }
+            if (results == null) return Enumerable.Empty<T>();
 
             return results.OfType<T>();
         }

@@ -11,21 +11,21 @@ using PasswordSettings = Birko.Data.Stores.PasswordSettings;
 namespace Birko.Data.SQL.Connectors
 {
     public delegate void InitConnector(AbstractConnector connector);
-    public delegate void OnException(Exception ex, string commandText);
+    public delegate void OnException(Exception ex, string? commandText);
     public delegate void OnExecute(string commandText);
 
     public abstract partial class AbstractConnector : AbstractConnectorBase
     {
-        public event InitConnector OnInit;
-        public event OnException OnException;
-        public event OnExecute OnExecute;
+        public event InitConnector OnInit = null!;
+        public event OnException? OnException;
+        public event OnExecute? OnExecute;
 
         public AbstractConnector(PasswordSettings settings) : base(settings)
         {
         }
 
 
-        public virtual void InitException(Exception ex, string commandText)
+        public virtual void InitException(Exception ex, string? commandText)
         {
             if (OnException != null)
             {
@@ -124,7 +124,7 @@ namespace Birko.Data.SQL.Connectors
                 catch (Exception ex) { InitException(ex, commandText); yield break; }
                 while (isNext)
                 {
-                    IEnumerable<object> row = null;
+                    IEnumerable<object>? row = null;
                     try { row = transformFunction.Invoke(reader); }
                     catch (Exception ex) { InitException(ex, commandText); }
                     if (row == null) yield break;
@@ -137,7 +137,7 @@ namespace Birko.Data.SQL.Connectors
 
         private void RunCommandWithExternalTransaction(Action<DbCommand> createCommand, Action<DbCommand> executeCommand)
         {
-            string commandText = null;
+            string? commandText = null;
             try
             {
                 using (var command = ExternalConnection!.CreateCommand())
@@ -160,7 +160,7 @@ namespace Birko.Data.SQL.Connectors
             using var db = CreateConnection(_settings);
             db.Open();
             using var transaction = db.BeginTransaction();
-            string commandText = null;
+            string? commandText = null;
             try
             {
                 using (var command = db.CreateCommand())
@@ -188,7 +188,7 @@ namespace Birko.Data.SQL.Connectors
         {
             using var db = CreateConnection(_settings);
             db.Open();
-            string commandText = null;
+            string? commandText = null;
             try
             {
                 using (var command = db.CreateCommand())
@@ -256,7 +256,7 @@ namespace Birko.Data.SQL.Connectors
                 }
                 while (isNext)
                 {
-                    IEnumerable<object> row = null;
+                    IEnumerable<object>? row = null;
                     try
                     {
                         row = transformFunction.Invoke(reader);

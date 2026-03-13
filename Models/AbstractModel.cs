@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Text;
-using Birko.Data.Attributes;
+using Birko.Data.SQL.Attributes;
 using Birko.Data.ViewModels;
 
 namespace Birko.Data.Models

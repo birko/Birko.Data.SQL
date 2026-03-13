@@ -29,14 +29,14 @@ namespace Birko.Data.SQL
 
         public static IEnumerable<AbstractField> LoadField(PropertyInfo field)
         {
-            Birko.Data.Attributes.Field[] fieldAttrs = (Birko.Data.Attributes.Field[])field.GetCustomAttributes(typeof(Birko.Data.Attributes.Field), true);
+            Birko.Data.SQL.Attributes.Field[] fieldAttrs = (Birko.Data.SQL.Attributes.Field[])field.GetCustomAttributes(typeof(Birko.Data.SQL.Attributes.Field), true);
             var tableField = Fields.AbstractField.CreateAbstractField(field, fieldAttrs);
             return tableField != null ? new[] { tableField } : Array.Empty<AbstractField>();
         }
 
         public static AbstractField GetField<T, P>(Expression<Func<T, P>> expr)
         {
-            PropertyInfo propInfo = null;
+            PropertyInfo? propInfo = null;
             if (expr.Body is UnaryExpression expression)
             {
                 propInfo = (expression.Operand as MemberExpression)?.Member as PropertyInfo;
@@ -57,7 +57,7 @@ namespace Birko.Data.SQL
             {
                 propInfo = typeof(Models.AbstractDatabaseModel).GetProperty(propInfo.Name);
             }
-            var fields = LoadField(propInfo);
+            var fields = LoadField(propInfo!);
             return fields.First();
         }
 
@@ -87,7 +87,7 @@ namespace Birko.Data.SQL
             {
                 foreach (var tableField in fields)
                 {
-                    result.Add(tableField.Name, tableField.Write(data));
+                    result.Add(tableField.Name, tableField.Write(data)!);
                 }
             }
             return result;

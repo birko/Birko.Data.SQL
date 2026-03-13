@@ -25,7 +25,7 @@ namespace Birko.Data.Stores
         /// <summary>
         /// Gets the database connector for this store.
         /// </summary>
-        public DB Connector { get; protected set; }
+        public DB Connector { get; protected set; } = null!;
 
         /// <inheritdoc />
         public SqlTransactionContext? TransactionContext { get; private set; }
@@ -139,15 +139,14 @@ namespace Birko.Data.Stores
         /// <inheritdoc />
         public override void Delete(T data)
         {
-            if (data != null)
+            if (data == null) return;
+
+            List<SQL.Conditions.Condition> conditions = new List<SQL.Conditions.Condition>();
+            foreach (var field in SQL.DataBase.GetPrimaryFields(typeof(T)))
             {
-                List<SQL.Conditions.Condition> conditions = new List<SQL.Conditions.Condition>();
-                foreach (var field in SQL.DataBase.GetPrimaryFields(typeof(T)))
-                {
-                    conditions.Add(SQL.DataBase.CreateCondition(field, data));
-                }
-                Connector.Delete(typeof(T), conditions);
+                conditions.Add(SQL.DataBase.CreateCondition(field, data));
             }
+            Connector.Delete(typeof(T), conditions);
         }
 
         #endregion

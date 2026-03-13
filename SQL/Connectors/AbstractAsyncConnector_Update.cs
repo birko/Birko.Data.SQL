@@ -15,7 +15,7 @@ namespace Birko.Data.SQL.Connectors
             return UpdateAsync(model, DataBase.ParseConditionExpression(expr), ct);
         }
 
-        public Task UpdateAsync(object model, IEnumerable<Conditions.Condition> conditions = null, CancellationToken ct = default)
+        public Task UpdateAsync(object model, IEnumerable<Conditions.Condition>? conditions = null, CancellationToken ct = default)
         {
             if (model != null)
             {
@@ -29,12 +29,12 @@ namespace Birko.Data.SQL.Connectors
             return UpdateAsync(DataBase.LoadTable(type), model, DataBase.ParseConditionExpression(expr), ct);
         }
 
-        public Task UpdateAsync(Type type, object model, IEnumerable<Conditions.Condition> conditions = null, CancellationToken ct = default)
+        public Task UpdateAsync(Type type, object model, IEnumerable<Conditions.Condition>? conditions = null, CancellationToken ct = default)
         {
             return UpdateAsync(DataBase.LoadTable(type), model, conditions, ct);
         }
 
-        public Task UpdateAsync(Tables.Table table, object model, IEnumerable<Conditions.Condition> conditions = null, CancellationToken ct = default)
+        public Task UpdateAsync(Tables.Table table, object model, IEnumerable<Conditions.Condition>? conditions = null, CancellationToken ct = default)
         {
             if (model != null)
             {
@@ -53,19 +53,19 @@ namespace Birko.Data.SQL.Connectors
             return UpdateAsync(type, expresions, DataBase.ParseConditionExpression(expr), ct);
         }
 
-        public Task UpdateAsync<T, P>(Type type, IDictionary<Expression<Func<T, P>>, object> expresions, IEnumerable<Conditions.Condition> conditions = null, CancellationToken ct = default)
+        public Task UpdateAsync<T, P>(Type type, IDictionary<Expression<Func<T, P>>, object> expresions, IEnumerable<Conditions.Condition>? conditions = null, CancellationToken ct = default)
         {
             var table = DataBase.LoadTable(type);
             return UpdateAsync(table, expresions, conditions, ct);
         }
 
-        public Task UpdateAsync<T, P>(Type type, IDictionary<Expression<Func<T, P>>, Expression<Func<T, P>>> expresions, IEnumerable<Conditions.Condition> conditions = null, CancellationToken ct = default)
+        public Task UpdateAsync<T, P>(Type type, IDictionary<Expression<Func<T, P>>, Expression<Func<T, P>>> expresions, IEnumerable<Conditions.Condition>? conditions = null, CancellationToken ct = default)
         {
             var table = DataBase.LoadTable(type);
             return UpdateAsync(table, expresions, conditions, ct);
         }
 
-        public Task UpdateAsync<T, P>(Tables.Table table, IDictionary<Expression<Func<T, P>>, object> expresions, IEnumerable<Conditions.Condition> conditions = null, CancellationToken ct = default)
+        public Task UpdateAsync<T, P>(Tables.Table table, IDictionary<Expression<Func<T, P>>, object> expresions, IEnumerable<Conditions.Condition>? conditions = null, CancellationToken ct = default)
         {
             if (table != null)
             {
@@ -74,7 +74,7 @@ namespace Birko.Data.SQL.Connectors
             return Task.CompletedTask;
         }
 
-        public Task UpdateAsync<T, P>(Tables.Table table, IDictionary<Expression<Func<T, P>>, Expression<Func<T, P>>> expresions, IEnumerable<Conditions.Condition> conditions = null, CancellationToken ct = default)
+        public Task UpdateAsync<T, P>(Tables.Table table, IDictionary<Expression<Func<T, P>>, Expression<Func<T, P>>> expresions, IEnumerable<Conditions.Condition>? conditions = null, CancellationToken ct = default)
         {
             if (table != null)
             {
@@ -83,7 +83,7 @@ namespace Birko.Data.SQL.Connectors
             return Task.CompletedTask;
         }
 
-        public Task UpdateAsync<T, P>(string tableName, IDictionary<Expression<Func<T, P>>, Expression<Func<T, P>>> expresions, IEnumerable<Conditions.Condition> conditions = null, CancellationToken ct = default)
+        public Task UpdateAsync<T, P>(string tableName, IDictionary<Expression<Func<T, P>>, Expression<Func<T, P>>> expresions, IEnumerable<Conditions.Condition>? conditions = null, CancellationToken ct = default)
         {
             var fields = new Dictionary<int, string>();
             var values = new Dictionary<string, object>();
@@ -98,7 +98,7 @@ namespace Birko.Data.SQL.Connectors
             return UpdateAsync(tableName, fields, values, conditions, true, ct);
         }
 
-        public Task UpdateAsync<T, P>(string tableName, IDictionary<Expression<Func<T, P>>, object> expresions, IEnumerable<Conditions.Condition> conditions = null, CancellationToken ct = default)
+        public Task UpdateAsync<T, P>(string tableName, IDictionary<Expression<Func<T, P>>, object> expresions, IEnumerable<Conditions.Condition>? conditions = null, CancellationToken ct = default)
         {
             var fields = new Dictionary<int, string>();
             var values = new Dictionary<string, object>();
@@ -113,14 +113,14 @@ namespace Birko.Data.SQL.Connectors
             return UpdateAsync(tableName, fields, values, conditions, false, ct);
         }
 
-        public Task UpdateAsync(Tables.Table table, IDictionary<string, object> values, IEnumerable<Conditions.Condition> conditions = null, CancellationToken ct = default)
+        public Task UpdateAsync(Tables.Table table, IDictionary<string, object> values, IEnumerable<Conditions.Condition>? conditions = null, CancellationToken ct = default)
         {
             var tableName = table.Name;
             IDictionary<int, string> fields = table.GetSelectFields();
             return UpdateAsync(tableName, fields, values, conditions, false, ct);
         }
 
-        public virtual async Task UpdateAsync(string tableName, IDictionary<int, string> fields, IDictionary<string, object> values, IEnumerable<Conditions.Condition> conditions = null, bool isExpressionValues = false, CancellationToken ct = default)
+        public virtual async Task UpdateAsync(string tableName, IDictionary<int, string> fields, IDictionary<string, object> values, IEnumerable<Conditions.Condition>? conditions = null, bool isExpressionValues = false, CancellationToken ct = default)
         {
             if (values != null && values.Any())
             {

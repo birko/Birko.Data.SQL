@@ -14,7 +14,7 @@ namespace Birko.Data.SQL.Connectors
     /// </summary>
     public abstract partial class AbstractConnectorBase
     {
-        protected readonly PasswordSettings _settings = null;
+        protected readonly PasswordSettings _settings = null!;
         protected readonly object _lock = new();
         public bool IsInitializing { get; protected set; } = false;
 
@@ -91,7 +91,7 @@ namespace Birko.Data.SQL.Connectors
         /// <summary>
         /// Adds a parameter to a DbCommand.
         /// </summary>
-        public virtual DbCommand AddParameter(DbCommand command, string name, object value)
+        public virtual DbCommand AddParameter(DbCommand command, string name, object? value)
         {
             if (command.Parameters.Contains(name))
             {
@@ -129,8 +129,8 @@ namespace Birko.Data.SQL.Connectors
         /// </summary>
         private string BuildSubConditions(Conditions.Condition condition, DbCommand command)
         {
-            var subConditionsSql = ConditionDefinition(condition.SubConditions, command);
-            var needsParens = condition.SubConditions.Count() > 1;
+            var subConditionsSql = ConditionDefinition(condition.SubConditions!, command);
+            var needsParens = condition.SubConditions!.Count() > 1;
             return needsParens ? $"({subConditionsSql})" : subConditionsSql;
         }
 
@@ -157,7 +157,7 @@ namespace Birko.Data.SQL.Connectors
         /// <summary>
         /// Builds SQL for multiple conditions
         /// </summary>
-        public virtual string ConditionDefinition(IEnumerable<Conditions.Condition> conditions, DbCommand command)
+        public virtual string ConditionDefinition(IEnumerable<Conditions.Condition>? conditions, DbCommand command)
         {
             var result = new StringBuilder();
             if (conditions != null && conditions.Any())
@@ -186,7 +186,7 @@ namespace Birko.Data.SQL.Connectors
         /// <summary>
         /// Builds LIMIT and OFFSET clause
         /// </summary>
-        public virtual string LimitOffsetDefinition(DbCommand command, int? limit = null, int? offset = null)
+        public virtual string? LimitOffsetDefinition(DbCommand command, int? limit = null, int? offset = null)
         {
             if (limit == null)
             {
@@ -206,7 +206,7 @@ namespace Birko.Data.SQL.Connectors
         /// <summary>
         /// Adds WHERE clause to command
         /// </summary>
-        public virtual DbCommand AddWhere(IEnumerable<Conditions.Condition> conditions, DbCommand command)
+        public virtual DbCommand? AddWhere(IEnumerable<Conditions.Condition>? conditions, DbCommand? command)
         {
             if (command != null && conditions != null && conditions.Any())
             {
@@ -265,7 +265,7 @@ namespace Birko.Data.SQL.Connectors
                 command.CommandText += QuoteIdentifier(table);
                 if (joins != null && joins.ContainsKey(table))
                 {
-                    var joingroups = joins[table].GroupBy(x => new { x.Right, x.JoinType }).ToDictionary(x => x.Key, x => x.SelectMany(y => y.Conditions).Where(z => z != null));
+                    var joingroups = joins[table].GroupBy(x => new { x.Right, x.JoinType }).ToDictionary(x => x.Key, x => x.SelectMany(y => y.Conditions ?? Enumerable.Empty<Conditions.Condition>()).Where(z => z != null));
                     foreach (var joingroup in joingroups.Where(x => x.Value.Any()))
                     {
                         command.CommandText +=
@@ -297,7 +297,7 @@ namespace Birko.Data.SQL.Connectors
             }
             if (limit != null)
             {
-                command.CommandText += LimitOffsetDefinition(command, limit, offset);
+                command.CommandText += LimitOffsetDefinition(command, limit, offset) ?? string.Empty;
             }
             return command;
         }

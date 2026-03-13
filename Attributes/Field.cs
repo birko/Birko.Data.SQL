@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Data;
 using System.Text;
 
-namespace Birko.Data.Attributes
+namespace Birko.Data.SQL.Attributes
 {
     [System.AttributeUsage(System.AttributeTargets.Property)]
     public abstract class Field : System.Attribute
@@ -13,8 +13,8 @@ namespace Birko.Data.Attributes
     [System.AttributeUsage(System.AttributeTargets.Property, Inherited = true)]
     public class NamedField : Field
     {
-        public string Name { get; internal set; } = null;
-        public NamedField(string name = null)
+        public string? Name { get; internal set; } = null;
+        public NamedField(string? name = null)
         {
             Name = name;
         }

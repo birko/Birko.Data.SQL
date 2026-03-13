@@ -95,19 +95,15 @@ namespace Birko.Data.Stores
         /// <inheritdoc />
         public override async Task InitAsync(CancellationToken ct = default)
         {
-            if (Connector != null)
-            {
-                await Task.Run(() => Connector.DoInit(), ct);
-            }
+            if (Connector == null) return;
+            await Task.Run(() => Connector.DoInit(), ct);
         }
 
         /// <inheritdoc />
         public override async Task DestroyAsync(CancellationToken ct = default)
         {
-            if (Connector != null)
-            {
-                await Task.Run(() => Connector.DropTable(new[] { typeof(T) }), ct);
-            }
+            if (Connector == null) return;
+            await Task.Run(() => Connector.DropTable(new[] { typeof(T) }), ct);
         }
 
         #endregion
@@ -117,10 +113,7 @@ namespace Birko.Data.Stores
         /// <inheritdoc />
         public override async Task<Guid> CreateAsync(T data, StoreDataDelegate<T>? processDelegate = null, CancellationToken ct = default)
         {
-            if (Connector == null || data == null)
-            {
-                return Guid.Empty;
-            }
+            if (Connector == null || data == null) return Guid.Empty;
 
             data.Guid ??= Guid.NewGuid();
             processDelegate?.Invoke(data);
@@ -132,16 +125,10 @@ namespace Birko.Data.Stores
         /// <inheritdoc />
         public override async Task<T?> ReadAsync(Expression<Func<T, bool>>? filter = null, CancellationToken ct = default)
         {
-            if (Connector == null)
-            {
-                return default;
-            }
+            if (Connector == null) return default;
 
             var results = await Task.Run(() => Connector.Select(typeof(T), filter as LambdaExpression), ct);
-            if (results == null)
-            {
-                return default;
-            }
+            if (results == null) return default;
 
             foreach (var item in results)
             {
@@ -156,10 +143,7 @@ namespace Birko.Data.Stores
         /// <inheritdoc />
         public override async Task UpdateAsync(T data, StoreDataDelegate<T>? processDelegate = null, CancellationToken ct = default)
         {
-            if (Connector == null || data == null)
-            {
-                return;
-            }
+            if (Connector == null || data == null) return;
 
             var conditions = new List<SQL.Conditions.Condition>();
 
@@ -176,10 +160,7 @@ namespace Birko.Data.Stores
         /// <inheritdoc />
         public override async Task DeleteAsync(T data, CancellationToken ct = default)
         {
-            if (Connector == null || data == null)
-            {
-                return;
-            }
+            if (Connector == null || data == null) return;
 
             var conditions = new List<SQL.Conditions.Condition>();
             foreach (var field in SQL.DataBase.GetPrimaryFields(typeof(T)))
@@ -197,10 +178,7 @@ namespace Birko.Data.Stores
         /// <inheritdoc />
         public override async Task<long> CountAsync(Expression<Func<T, bool>>? filter = null, CancellationToken ct = default)
         {
-            if (Connector == null)
-            {
-                return 0;
-            }
+            if (Connector == null) return 0;
 
             return await Task.Run(() => Connector.SelectCount(typeof(T), filter), ct);
         }

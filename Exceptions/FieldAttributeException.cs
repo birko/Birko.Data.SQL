@@ -6,7 +6,7 @@ namespace Birko.Data.Exceptions
 {
     public class FieldAttributeException : Exception
     {
-        public FieldAttributeException(string message) : this(message, null) {}
-        public FieldAttributeException(string message, Exception innerException) : base(message, innerException) { }
+        public FieldAttributeException(string message) : this(message, null!) {}
+        public FieldAttributeException(string message, Exception? innerException) : base(message, innerException) { }
     }
 }

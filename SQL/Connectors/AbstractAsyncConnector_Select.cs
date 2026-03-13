@@ -35,7 +35,7 @@ namespace Birko.Data.SQL.Connectors
             }
         }
 
-        public async IAsyncEnumerable<object> SelectAsync(Type[] types, LambdaExpression expr, IDictionary<string, bool> orderFields = null, int? limit = null, int? offset = null)
+        public async IAsyncEnumerable<object> SelectAsync(Type[] types, LambdaExpression expr, IDictionary<string, bool>? orderFields = null, int? limit = null, int? offset = null)
         {
             await foreach (var item in SelectAsync(types, (expr != null) ? DataBase.ParseConditionExpression(expr) : null, orderFields, limit, offset))
             {
@@ -43,11 +43,11 @@ namespace Birko.Data.SQL.Connectors
             }
         }
 
-        public async IAsyncEnumerable<object> SelectAsync(Type type, IEnumerable<Conditions.Condition>? conditions = null, IDictionary<string, bool> orderFields = null, int? limit = null, int? offset = null)
+        public async IAsyncEnumerable<object> SelectAsync(Type type, IEnumerable<Conditions.Condition>? conditions = null, IDictionary<string, bool>? orderFields = null, int? limit = null, int? offset = null)
         {
             await foreach (var items in SelectAsync(new[] { type }, conditions, orderFields, limit, offset))
             {
-                yield return items.FirstOrDefault();
+                yield return items.FirstOrDefault()!;
             }
         }
 
@@ -64,7 +64,7 @@ namespace Birko.Data.SQL.Connectors
                 List<object> objects = new();
                 foreach (var type in types)
                 {
-                    var data = Activator.CreateInstance(type, Array.Empty<object>());
+                    var data = Activator.CreateInstance(type, Array.Empty<object>())!;
                     index = DataBase.Read(reader, data, index);
                     objects.Add(data);
                 }
@@ -117,7 +117,7 @@ namespace Birko.Data.SQL.Connectors
             {
                 command = CreateSelectCommand(command, tableNames.Where(x => !string.IsNullOrEmpty(x)).Distinct(), fields, conditions, orderFields, limit, offset);
                 await Task.CompletedTask;
-            }, transformFunction))
+            }, transformFunction!))
             {
                 yield return item;
             }

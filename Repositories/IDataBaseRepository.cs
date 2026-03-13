@@ -13,7 +13,7 @@ namespace Birko.Data.Repositories
         where TConnector : SQL.Connectors.AbstractConnector
         where T : Models.AbstractModel
     {
-        TConnector Connector { get; }
+        TConnector? Connector { get; }
         void AddOnInit(SQL.Connectors.InitConnector onInit);
         void RemoveOnInit(SQL.Connectors.InitConnector onInit);
     }

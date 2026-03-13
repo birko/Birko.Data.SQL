@@ -11,20 +11,20 @@ using PasswordSettings = Birko.Data.Stores.PasswordSettings;
 namespace Birko.Data.SQL.Connectors
 {
     public delegate void InitAsyncConnector(AbstractAsyncConnector connector);
-    public delegate void OnAsyncException(Exception ex, string commandText);
+    public delegate void OnAsyncException(Exception ex, string? commandText);
     public delegate void OnAsyncExecute(string commandText);
 
     public abstract partial class AbstractAsyncConnector : AbstractConnectorBase
     {
-        public event InitAsyncConnector OnInit;
-        public event OnAsyncException OnException;
-        public event OnAsyncExecute OnExecute;
+        public event InitAsyncConnector? OnInit;
+        public event OnAsyncException? OnException;
+        public event OnAsyncExecute? OnExecute;
 
         public AbstractAsyncConnector(PasswordSettings settings) : base(settings)
         {
         }
 
-        public virtual void InitException(Exception ex, string commandText)
+        public virtual void InitException(Exception ex, string? commandText)
         {
             if (OnException != null)
             {
@@ -88,16 +88,16 @@ namespace Birko.Data.SQL.Connectors
             await using var db = CreateConnection(_settings);
             await db.OpenAsync(ct);
             await using var transaction = await db.BeginTransactionAsync(ct);
-            string commandText = null;
+            string? commandText = null;
             try
             {
                 await using (var command = db.CreateCommand())
                 {
                     command.Transaction = transaction;
-                    await createCommand?.Invoke(command);
+                    if (createCommand != null) await createCommand.Invoke(command);
                     commandText = DataBase.GetGeneratedQuery(command);
                     OnExecute?.Invoke(commandText);
-                    await executeCommand?.Invoke(command);
+                    if (executeCommand != null) await executeCommand.Invoke(command);
                 }
                 await transaction.CommitAsync(ct);
             }
@@ -116,15 +116,15 @@ namespace Birko.Data.SQL.Connectors
         {
             await using var db = CreateConnection(_settings);
             await db.OpenAsync(ct);
-            string commandText = null;
+            string? commandText = null;
             try
             {
                 await using (var command = db.CreateCommand())
                 {
-                    await createCommand?.Invoke(command);
+                    if (createCommand != null) await createCommand.Invoke(command);
                     commandText = DataBase.GetGeneratedQuery(command);
                     OnExecute?.Invoke(commandText);
-                    await executeCommand?.Invoke(command);
+                    if (executeCommand != null) await executeCommand.Invoke(command);
                 }
             }
             catch (Exception ex)
@@ -151,7 +151,7 @@ namespace Birko.Data.SQL.Connectors
             {
                 try
                 {
-                    await createCommand?.Invoke(command);
+                    if (createCommand != null) await createCommand.Invoke(command);
                     commandText = DataBase.GetGeneratedQuery(command);
                     OnExecute?.Invoke(command.CommandText);
                 }
@@ -176,7 +176,7 @@ namespace Birko.Data.SQL.Connectors
                 }
                 while (isNext)
                 {
-                    IEnumerable<object> row = null;
+                    IEnumerable<object>? row = null;
                     try
                     {
                         row = await transformFunction.Invoke(reader);

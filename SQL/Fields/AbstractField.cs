@@ -9,15 +9,15 @@ namespace Birko.Data.SQL.Fields
 {
     public abstract class AbstractField
     {
-        public string Name { get; set; }
+        public string Name { get; set; } = null!;
         public DbType Type { get; set; } = DbType.String;
         public bool IsPrimary { get; set; } = false;
         public bool IsUnique { get; set; } = false;
         public bool IsNotNull { get; set; } = false;
         public bool IsAutoincrement { get; set; } = false;
         public bool IsAggregate { get; set; } = false;
-        public System.Reflection.PropertyInfo Property { get; set; }
-        public Tables.Table Table { get; set; }
+        public System.Reflection.PropertyInfo Property { get; set; } = null!;
+        public Tables.Table Table { get; set; } = null!;
 
         public AbstractField(System.Reflection.PropertyInfo property, string name, DbType type = DbType.String, bool primary = false, bool notNull = false, bool unique = false, bool autoincrement = false)
         {
@@ -35,11 +35,11 @@ namespace Birko.Data.SQL.Fields
             return (IsAggregate)
                         ? string.Format("{0}({1})",
                             Name,
-                            string.Join(",", (this as Fields.FunctionField).Parameters?.Select(x => string.Format("{0}{1}", (withName ? Table.Name + "." : string.Empty), x)) ?? new string[0]))
+                            string.Join(",", ((this as Fields.FunctionField)?.Parameters?.Select(x => string.Format("{0}{1}", (withName ? Table.Name + "." : string.Empty), x))) ?? new string[0]))
                         : (withName ? Table.Name + "." : string.Empty) + Name;
         }
 
-        public virtual object Write(object value)
+        public virtual object? Write(object value)
         {
             return Property.GetValue(value, null);
         }
@@ -56,7 +56,7 @@ namespace Birko.Data.SQL.Fields
             return false; // value-type
         }
 
-        public static AbstractField CreateAbstractField(System.Reflection.PropertyInfo property, Birko.Data.Attributes.Field[] fields = null)
+        public static AbstractField CreateAbstractField(System.Reflection.PropertyInfo property, Birko.Data.SQL.Attributes.Field[]? fields = null)
         {
             var isNullable = IsNullable(property.PropertyType);
             string name = property.Name;
@@ -70,28 +70,28 @@ namespace Birko.Data.SQL.Fields
             {
                 foreach (var field in fields.Where(x => x != null))
                 {
-                    if (field is Birko.Data.Attributes.NamedField namedfield)
+                    if (field is Birko.Data.SQL.Attributes.NamedField namedfield)
                     {
                         name = !string.IsNullOrEmpty(namedfield.Name) ? namedfield.Name : name;
                     }
 
-                    if (field is Birko.Data.Attributes.PrimaryField)
+                    if (field is Birko.Data.SQL.Attributes.PrimaryField)
                     {
                         primary = true;
                     }
-                    if (field is Birko.Data.Attributes.UniqueField)
+                    if (field is Birko.Data.SQL.Attributes.UniqueField)
                     {
                         unique = true;
                     }
-                    if (field is Birko.Data.Attributes.IncrementField)
+                    if (field is Birko.Data.SQL.Attributes.IncrementField)
                     {
                         autoincrement = true;
                     }
-                    if (field is Birko.Data.Attributes.PrecisionField precisionField)
+                    if (field is Birko.Data.SQL.Attributes.PrecisionField precisionField)
                     {
                         precision = precisionField.Precision;
                     }
-                    if (field is Birko.Data.Attributes.ScaleField scaleField)
+                    if (field is Birko.Data.SQL.Attributes.ScaleField scaleField)
                     {
                         scale = scaleField.Scale;
                     }

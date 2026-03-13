@@ -13,7 +13,7 @@ namespace Birko.Data.SQL.Connectors
             Update(model, DataBase.ParseConditionExpression(expr));
         }
 
-        public void Update(object model, IEnumerable<Conditions.Condition> conditions = null)
+        public void Update(object model, IEnumerable<Conditions.Condition>? conditions = null)
         {
             if (model != null)
             {
@@ -26,12 +26,12 @@ namespace Birko.Data.SQL.Connectors
             Update(DataBase.LoadTable(type), model, DataBase.ParseConditionExpression(expr));
         }
 
-        public void Update(Type type, object model, IEnumerable<Conditions.Condition> conditions = null)
+        public void Update(Type type, object model, IEnumerable<Conditions.Condition>? conditions = null)
         {
             Update(DataBase.LoadTable(type), model, conditions);
         }
 
-        public void Update(Tables.Table table, object model, IEnumerable<Conditions.Condition> conditions = null)
+        public void Update(Tables.Table table, object model, IEnumerable<Conditions.Condition>? conditions = null)
         {
             if (model != null)
             {
@@ -49,19 +49,19 @@ namespace Birko.Data.SQL.Connectors
             Update(type, expresions, DataBase.ParseConditionExpression(expr));
         }
 
-        public void Update<T,P>(Type type, IDictionary<Expression<Func<T, P>>, object> expresions, IEnumerable<Conditions.Condition> conditions = null)
+        public void Update<T,P>(Type type, IDictionary<Expression<Func<T, P>>, object> expresions, IEnumerable<Conditions.Condition>? conditions = null)
         {
             var table = DataBase.LoadTable(type);
             Update(table, expresions, conditions);
         }
 
-        public void Update<T, P>(Type type, IDictionary<Expression<Func<T, P>>, Expression<Func<T, P>>> expresions, IEnumerable<Conditions.Condition> conditions = null)
+        public void Update<T, P>(Type type, IDictionary<Expression<Func<T, P>>, Expression<Func<T, P>>> expresions, IEnumerable<Conditions.Condition>? conditions = null)
         {
             var table = DataBase.LoadTable(type);
             Update(table, expresions, conditions);
         }
 
-        public void Update<T, P>(Tables.Table table, IDictionary<Expression<Func<T, P>>, object> expresions, IEnumerable<Conditions.Condition> conditions = null)
+        public void Update<T, P>(Tables.Table table, IDictionary<Expression<Func<T, P>>, object> expresions, IEnumerable<Conditions.Condition>? conditions = null)
         {
             if (table != null)
             {
@@ -69,7 +69,7 @@ namespace Birko.Data.SQL.Connectors
             }
         }
 
-        public void Update<T, P>(Tables.Table table, IDictionary<Expression<Func<T, P>>, Expression<Func<T, P>>> expresions, IEnumerable<Conditions.Condition> conditions = null)
+        public void Update<T, P>(Tables.Table table, IDictionary<Expression<Func<T, P>>, Expression<Func<T, P>>> expresions, IEnumerable<Conditions.Condition>? conditions = null)
         {
             if (table != null)
             {
@@ -77,7 +77,7 @@ namespace Birko.Data.SQL.Connectors
             }
         }
 
-        public void Update<T, P>(string tableName, IDictionary<Expression<Func<T, P>>, Expression<Func<T, P>>> expresions, IEnumerable<Conditions.Condition> conditions = null)
+        public void Update<T, P>(string tableName, IDictionary<Expression<Func<T, P>>, Expression<Func<T, P>>> expresions, IEnumerable<Conditions.Condition>? conditions = null)
         {
             var fields = new Dictionary<int, string>();
             var values = new Dictionary<string, object>();
@@ -92,7 +92,7 @@ namespace Birko.Data.SQL.Connectors
             Update(tableName, fields, values, conditions, true);
         }
 
-        public void Update<T, P>(string tableName, IDictionary<Expression<Func<T, P>>, object> expresions, IEnumerable<Conditions.Condition> conditions = null)
+        public void Update<T, P>(string tableName, IDictionary<Expression<Func<T, P>>, object> expresions, IEnumerable<Conditions.Condition>? conditions = null)
         {
             var fields = new Dictionary<int, string>();
             var values = new Dictionary<string, object>();
@@ -107,14 +107,14 @@ namespace Birko.Data.SQL.Connectors
             Update(tableName, fields, values, conditions);
         }
 
-        public void Update(Tables.Table table, IDictionary<string, object> values, IEnumerable<Conditions.Condition> conditions = null)
+        public void Update(Tables.Table table, IDictionary<string, object> values, IEnumerable<Conditions.Condition>? conditions = null)
         {
             var tableName = table.Name;
             IDictionary<int, string> fields = table.GetSelectFields();
             Update(tableName, fields, values, conditions);
         }
 
-        public void Update(string tableName, IDictionary<int, string> fields, IDictionary<string, object> values, IEnumerable<Conditions.Condition> conditions = null, bool isExpressionValues = false)
+        public void Update(string tableName, IDictionary<int, string> fields, IDictionary<string, object> values, IEnumerable<Conditions.Condition>? conditions = null, bool isExpressionValues = false)
         {
             if (values != null && values.Any())
             {

@@ -34,7 +34,7 @@ namespace Birko.Data.SQL
             var connectorDict = _connectors.GetOrAdd(connectorType, _ => new ConcurrentDictionary<string, AbstractConnector>());
             return connectorDict.GetOrAdd(settingsId, id =>
             {
-                return (AbstractConnector)Activator.CreateInstance(typeof(T), new object[] { settings });
+                return (AbstractConnector)Activator.CreateInstance(typeof(T), new object[] { settings })!;
             });
         }
 
@@ -46,7 +46,7 @@ namespace Birko.Data.SQL
             var connectorDict = _asyncConnectors.GetOrAdd(connectorType, _ => new ConcurrentDictionary<string, AbstractAsyncConnector>());
             return connectorDict.GetOrAdd(settingsId, id =>
             {
-                return (AbstractAsyncConnector)Activator.CreateInstance(typeof(T), new object[] { settings });
+                return (AbstractAsyncConnector)Activator.CreateInstance(typeof(T), new object[] { settings })!;
             });
         }
 
@@ -68,7 +68,7 @@ namespace Birko.Data.SQL
             foreach (DbParameter parameter in dbCommand.Parameters)
             {
                 bool isString = _stringTypes.Contains(parameter.DbType);
-                string value = isString
+                string? value = isString
                         ? "'" + parameter.Value?.ToString() + "'"
                         : parameter.Value?.ToString();
                 query.Replace(parameter.ParameterName, value);
@@ -82,7 +82,7 @@ namespace Birko.Data.SQL
             return new Conditions.Condition(field.Name, new[] { field.Property.GetValue(value, null) });
         }
 
-        public static string ParseExpression(Expression expr, IDictionary<string, object> parameters, bool withTableName = false, Type exprType = null)
+        public static string? ParseExpression(Expression expr, IDictionary<string, object> parameters, bool withTableName = false, Type? exprType = null)
         {
             if (expr != null)
             {
@@ -155,7 +155,7 @@ namespace Birko.Data.SQL
                     {
                         StringBuilder result = new StringBuilder();
                         //maybe platform specific implementation
-                        result.AppendFormat("REPLACE({0}", ParseExpression(callExpression.Object, parameters, withTableName, exprType));
+                        result.AppendFormat("REPLACE({0}", ParseExpression(callExpression.Object!, parameters, withTableName, exprType));
                         foreach (var argument in callExpression.Arguments)
                         {
                             result.AppendFormat(", {0}", ParseExpression(argument, parameters, withTableName, exprType));
@@ -168,7 +168,7 @@ namespace Birko.Data.SQL
                         var key = "@Constat" + parameters.Count;
                         var f = Expression.Lambda(callExpression).Compile();
                         var value = f.DynamicInvoke();
-                        parameters.Add(key, value);
+                        parameters.Add(key, value!);
                         return key;
                     }
                 }
@@ -184,8 +184,8 @@ namespace Birko.Data.SQL
                     string name = string.Empty;
                     if (
                         exprType != null
-                        && memberExpression.Member.ReflectedType.IsAssignableFrom(exprType)
-                        && (memberExpression.Expression.NodeType == ExpressionType.Parameter || memberExpression.Expression.NodeType == ExpressionType.TypeAs)
+                        && memberExpression.Member.ReflectedType?.IsAssignableFrom(exprType) == true
+                        && (memberExpression.Expression?.NodeType == ExpressionType.Parameter || memberExpression.Expression?.NodeType == ExpressionType.TypeAs)
                     )
                     {
                         var table = LoadTable(exprType);
@@ -194,7 +194,7 @@ namespace Birko.Data.SQL
                             var field = table.GetFieldByPropertyName(memberExpression.Member.Name);
                             if (field != null)
                             {
-                                name = field?.GetSelectName(withTableName);
+                                name = field.GetSelectName(withTableName);
                             }
                         }
                         else
@@ -205,7 +205,7 @@ namespace Birko.Data.SQL
                                 var field = view.GetTableFields().FirstOrDefault(x => x.Property.Name == memberExpression.Member.Name);
                                 if (field != null)
                                 {
-                                    name = field?.GetSelectName(withTableName);
+                                    name = field.GetSelectName(withTableName);
                                 }
                             }
                         }
@@ -214,10 +214,10 @@ namespace Birko.Data.SQL
                     {
                         if (memberExpression.Expression is ConstantExpression constantExpression)
                         {
-                            Type type = constantExpression.Value.GetType();
+                            Type type = constantExpression.Value!.GetType();
                             var value = type.InvokeMember(memberExpression.Member.Name, BindingFlags.GetField, null, constantExpression.Value, null);
                             var key = "@Constat" + parameters.Count;
-                            parameters.Add(key, value);
+                            parameters.Add(key, value!);
                             return key;
                         }
                         else if (memberExpression.Expression != null)
@@ -229,7 +229,7 @@ namespace Birko.Data.SQL
                             var key = "@Constat" + parameters.Count;
                             var f = Expression.Lambda(memberExpression).Compile();
                             var value = f.DynamicInvoke();
-                            parameters.Add(key, value);
+                            parameters.Add(key, value!);
                             return key;
                         }
                     }
@@ -241,14 +241,14 @@ namespace Birko.Data.SQL
                 else if (expr is ConstantExpression constantExpression)
                 {
                     var key = "@Constat" + parameters.Count;
-                    parameters.Add(key, constantExpression.Value);
+                    parameters.Add(key, constantExpression.Value!);
                     return key;
                 }
             }
             return null;
         }
 
-        public static IEnumerable<Conditions.Condition> ParseConditionExpression(Expression? expr = null, Conditions.Condition parent = null, Type exprType = null)
+        public static IEnumerable<Conditions.Condition> ParseConditionExpression(Expression? expr = null, Conditions.Condition? parent = null, Type? exprType = null)
         {
             if (expr != null)
             {
@@ -367,7 +367,7 @@ namespace Birko.Data.SQL
                     if (methodExpression.Method.Name == "Contains")
                     {
                         //condition.Name = 
-                        if (methodExpression.Method.DeclaringType.Name == "String")
+                        if (methodExpression.Method.DeclaringType?.Name == "String")
                         {
                             condition.Type = ConditionType.Like;
                         }
@@ -393,7 +393,7 @@ namespace Birko.Data.SQL
                 {
                     if (expr is ConstantExpression || expr is MethodCallExpression)
                     {
-                        IEnumerable<object> vals = InvokeExpression(expr);
+                        IEnumerable<object>? vals = InvokeExpression(expr);
                         if (vals?.Any(x => x != null) ?? false)
                         {
                             parent.Values = vals.Where(x => x != null);
@@ -423,7 +423,7 @@ namespace Birko.Data.SQL
                         {
                             var member = new Condition(null, null);
                             ParseConditionExpression(memberExpression.Expression, member, exprType);
-                            name = member.Name;
+                            name = member.Name ?? string.Empty;
                         }
                         if (
                             exprType != null
@@ -439,7 +439,7 @@ namespace Birko.Data.SQL
                                 var field = table.GetFieldByPropertyName(memberExpression.Member.Name);
                                 if (field != null)
                                 {
-                                    name = field?.GetSelectName(true);
+                                    name = field.GetSelectName(true);
                                 }
                             }
                             else
@@ -450,7 +450,7 @@ namespace Birko.Data.SQL
                                     var field = view.GetTableFields().FirstOrDefault(x => x.Property.Name == memberExpression.Member.Name);
                                     if (field != null)
                                     {
-                                        name = field?.GetSelectName(true);
+                                        name = field.GetSelectName(true);
                                     }
                                 }
 
@@ -460,7 +460,7 @@ namespace Birko.Data.SQL
                         {
                             if (memberExpression.Expression is ConstantExpression constantExpression)
                             {
-                                Type type = constantExpression.Value.GetType();
+                                Type type = constantExpression.Value!.GetType();
                                 var value = type.InvokeMember(memberExpression.Member.Name, BindingFlags.GetField | BindingFlags.GetProperty, null, constantExpression.Value, null);
                                 parent.Values = (!(value is string) && (value is IEnumerable)) ? (IEnumerable)value : new[] { value };
                             }
@@ -470,7 +470,7 @@ namespace Birko.Data.SQL
                             //}
                             else
                             {
-                                IEnumerable<object> vals = InvokeExpression(expr);
+                                IEnumerable<object>? vals = InvokeExpression(expr);
                                 if (vals?.Any(x => x != null) ?? false)
                                 {
                                     parent.Values = vals.Where(x => x != null);
@@ -563,7 +563,7 @@ namespace Birko.Data.SQL
                 {
                     foreach (var field in fields)
                     {
-                        vals.Add(field.GetValue(value));
+                        vals.Add(field.GetValue(value)!);
                     }
                 }
             }

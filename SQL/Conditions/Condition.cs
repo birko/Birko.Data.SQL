@@ -21,15 +21,15 @@ namespace Birko.Data.SQL.Conditions
 
     public class Condition
     {
-        public string Name { get; set; }
-        public IEnumerable Values { get; set; }
+        public string? Name { get; set; }
+        public IEnumerable? Values { get; set; }
         public bool IsField { get; set; } = false;
         public ConditionType Type { get; set; } = ConditionType.Equal;
-        public IEnumerable<Condition> SubConditions { get; set; } = null;
+        public IEnumerable<Condition>? SubConditions { get; set; } = null;
         public bool IsOr { get; set; } = false;
         public bool IsNot { get; set; } = false;
 
-        public Condition(string name, IEnumerable values, ConditionType type = ConditionType.Equal, bool isField = false, bool isNot = false, bool isOr = false, IEnumerable<Condition> subConditions = null)
+        public Condition(string? name, IEnumerable? values, ConditionType type = ConditionType.Equal, bool isField = false, bool isNot = false, bool isOr = false, IEnumerable<Condition>? subConditions = null)
         {
             Name = name;
             Type = type;
@@ -65,7 +65,7 @@ namespace Birko.Data.SQL.Conditions
             return new Condition(name, new[] { field }, type, true, isNot);
         }
 
-        public static Condition AndSubCondition(IEnumerable<Condition> subConditions = null, ConditionType type = ConditionType.Equal, bool isNot = false)
+        public static Condition AndSubCondition(IEnumerable<Condition>? subConditions = null, ConditionType type = ConditionType.Equal, bool isNot = false)
         {
             return new Condition(null, null, type, false, isNot, false, subConditions);
         }
@@ -85,7 +85,7 @@ namespace Birko.Data.SQL.Conditions
             return new Condition(name, new[] { field }, type, true, isNot, true);
         }
 
-        public static Condition OrSubCondition(IEnumerable<Condition> subConditions = null, ConditionType type = ConditionType.Equal, bool isNot = false)
+        public static Condition OrSubCondition(IEnumerable<Condition>? subConditions = null, ConditionType type = ConditionType.Equal, bool isNot = false)
         {
             return new Condition(null, null, type, false, isNot, true, subConditions);
         }

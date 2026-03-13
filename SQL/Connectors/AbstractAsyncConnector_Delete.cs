@@ -15,18 +15,18 @@ namespace Birko.Data.SQL.Connectors
             return DeleteAsync(type, DataBase.ParseConditionExpression(expr), ct);
         }
 
-        public Task DeleteAsync(Type type, IEnumerable<Conditions.Condition> conditions = null, CancellationToken ct = default)
+        public Task DeleteAsync(Type type, IEnumerable<Conditions.Condition>? conditions = null, CancellationToken ct = default)
         {
             return DeleteAsync(DataBase.LoadTable(type), conditions, ct);
         }
 
-        public Task DeleteAsync(Tables.Table table, IEnumerable<Conditions.Condition> conditions = null, CancellationToken ct = default)
+        public Task DeleteAsync(Tables.Table table, IEnumerable<Conditions.Condition>? conditions = null, CancellationToken ct = default)
         {
             var tableName = table.Name;
             return DeleteAsyncAsync(tableName, conditions, ct);
         }
 
-        private async Task DeleteAsyncAsync(string tableName, IEnumerable<Conditions.Condition> conditions = null, CancellationToken ct = default)
+        private async Task DeleteAsyncAsync(string tableName, IEnumerable<Conditions.Condition>? conditions = null, CancellationToken ct = default)
         {
             await DoCommandWithTransactionAsync(async (command) =>
             {
