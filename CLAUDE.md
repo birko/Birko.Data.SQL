@@ -133,7 +133,7 @@ public override void SetSettings(Settings settings)
 ```
 
 ## Dependencies
-- Birko.Data (interfaces and base classes)
+- Birko.Data.Core, Birko.Data.Stores, Birko.Data.Repositories
 - .NET 10.0
 
 ## Dependents

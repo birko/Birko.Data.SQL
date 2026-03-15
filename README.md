@@ -18,7 +18,8 @@ dotnet add package Birko.Data.SQL
 
 ## Dependencies
 
-- Birko.Data
+- Birko.Data.Core (AbstractModel, models)
+- Birko.Data.Stores (store interfaces, Settings, RemoteSettings)
 - .NET 10.0
 
 ## Usage
