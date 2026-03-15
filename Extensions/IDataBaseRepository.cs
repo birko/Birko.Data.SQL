@@ -8,7 +8,7 @@ namespace Birko.Data.DataBase.Extensions
 {
     public static class IDataBaseRepositoryExtensions
     {
-        public static TViewModel ReadOne<TRepository, TConnector, TViewModel, TModel>(this TRepository respository, IRepositoryFilter<TModel>? filter = null, IDictionary<Expression<Func<TModel, object>>, bool> orderByExpr = null)
+        public static TViewModel ReadOne<TRepository, TConnector, TViewModel, TModel>(this TRepository respository, IFilter<TModel>? filter = null, IDictionary<Expression<Func<TModel, object>>, bool> orderByExpr = null)
             where TRepository : AbstractViewModelRepository<TViewModel, TModel>, IDataBaseRepository<TConnector, TViewModel, TModel>
             where TConnector : SQL.Connectors.AbstractConnector
             where TModel : Models.AbstractModel, Models.ILoadable<TViewModel>
