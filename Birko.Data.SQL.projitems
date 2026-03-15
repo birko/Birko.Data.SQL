@@ -14,6 +14,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)Repositories\IDataBaseRepository.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Conditions\Condition.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Conditions\Join.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Conditions\RuleConditionConverter.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\AbstractAsyncConnector.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\AbstractAsyncConnector_Alter_Add.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\AbstractAsyncConnector_Alter_Drop.cs" />
