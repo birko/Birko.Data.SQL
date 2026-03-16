@@ -48,13 +48,17 @@ Extends AsyncDataBaseStore with async bulk operations.
 
 ### SQL Components
 
-#### Attributes
-- `TableAttribute` - Marks entity as database table
-- `ColumnAttribute` - Marks property as table column
-- `PrimaryKeyAttribute` - Marks primary key column
-- `ForeignKeyAttribute` - Marks foreign key relationship
+#### Attributes (`Birko.Data.SQL.Attributes`)
+- `Table(string name)` - Maps entity class to a database table
+- `NamedField(string? name)` - Maps property to a column with a custom name
+- `PrimaryField` - Marks primary key column
+- `UniqueField` - Marks column as unique
+- `IncrementField` - Marks column as auto-increment
 - `RequiredField` - Forces NOT NULL even for nullable C# types
 - `MaxLengthField(int maxLength)` - Sets VARCHAR length for string fields (takes priority over PrecisionField)
+- `PrecisionField(int precision)` - Sets numeric precision
+- `ScaleField(int scale)` - Sets numeric scale
+- `IgnoreField` - Excludes a property from SQL field mapping (skipped during table creation and CRUD operations)
 
 #### Models
 - `ColumnModel` - Represents a table column
@@ -145,6 +149,12 @@ public override void SetSettings(Settings settings)
 - Birko.Data.SQL.View
 
 ## Important Notes
+
+### Enum Support
+Enum properties are automatically mapped to `INTEGER` fields. `IntegerField` handles read/write conversion via `Enum.ToObject()` and `(int)` cast. Both non-nullable and nullable enums are supported.
+
+### IgnoreField Attribute
+Properties decorated with `[IgnoreField]` are skipped by `AbstractField.CreateAbstractField()` — they won't be included in table creation or any CRUD operations. Unsupported property types also return `null` instead of throwing `FieldAttributeException`.
 
 ### Connector Property
 Always use `protected set` for the Connector property:

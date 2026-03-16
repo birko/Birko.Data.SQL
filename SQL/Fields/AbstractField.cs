@@ -58,6 +58,10 @@ namespace Birko.Data.SQL.Fields
 
         public static AbstractField CreateAbstractField(System.Reflection.PropertyInfo property, Birko.Data.SQL.Attributes.Field[]? fields = null)
         {
+            // Skip properties marked with [IgnoreField]
+            if (fields != null && fields.Any(f => f is Birko.Data.SQL.Attributes.IgnoreField))
+                return null;
+
             var isNullable = IsNullable(property.PropertyType);
             string name = property.Name;
             bool primary = false;
@@ -171,7 +175,17 @@ namespace Birko.Data.SQL.Fields
                 return stringField;
             }
 
-            throw new Exceptions.FieldAttributeException("No field attributes in type");
+            // Unknown property type — check if it's an enum (store as int)
+            var underlyingType = Nullable.GetUnderlyingType(property.PropertyType) ?? property.PropertyType;
+            if (underlyingType.IsEnum)
+            {
+                return (effectiveNotNull)
+                        ? (AbstractField)new IntegerField(property, name, primary, unique, autoincrement)
+                        : (AbstractField)new NullableIntegerField(property, name, primary, unique, autoincrement);
+            }
+
+            // Unsupported type — skip (return null, filtered by LoadField)
+            return null;
         }
     }
 }

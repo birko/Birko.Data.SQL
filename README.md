@@ -57,12 +57,18 @@ public class CustomerStore : DataBaseStore<SqlConnection, Customer>, IStore<Cust
 - **AsyncDataBaseRepository\<T,S,DB\>** - Async repository
 - **AsyncDataBaseBulkRepository\<T,S,DB\>** - Async bulk repository
 
-### Attributes
+### Attributes (`Birko.Data.SQL.Attributes`)
 
-- **TableAttribute** - Maps entity to database table
-- **ColumnAttribute** - Maps property to table column
-- **PrimaryKeyAttribute** - Marks primary key column
-- **ForeignKeyAttribute** - Marks foreign key relationship
+- **Table(string name)** - Maps entity class to a database table
+- **NamedField(string? name)** - Maps property to a column with a custom name
+- **PrimaryField** - Marks primary key column
+- **UniqueField** - Marks column as unique
+- **IncrementField** - Marks column as auto-increment
+- **RequiredField** - Forces NOT NULL even for nullable C# types
+- **MaxLengthField(int maxLength)** - Sets VARCHAR length for string fields
+- **PrecisionField(int precision)** - Sets numeric precision
+- **ScaleField(int scale)** - Sets numeric scale
+- **IgnoreField** - Excludes a property from SQL field mapping (skipped during table creation and CRUD operations)
 
 ### Settings
 

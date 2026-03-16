@@ -10,6 +10,15 @@ namespace Birko.Data.SQL.Attributes
     {
     }
 
+    /// <summary>
+    /// Marks a property to be excluded from SQL field mapping.
+    /// Properties with this attribute are skipped during table creation and CRUD operations.
+    /// </summary>
+    [System.AttributeUsage(System.AttributeTargets.Property, Inherited = true)]
+    public class IgnoreField : Field
+    {
+    }
+
     [System.AttributeUsage(System.AttributeTargets.Property, Inherited = true)]
     public class NamedField : Field
     {

@@ -15,7 +15,22 @@ namespace Birko.Data.SQL.Fields
 
         public override void Read(object value, DbDataReader reader, int index)
         {
-            Property.SetValue(value, reader.GetInt32(index), null);
+            var intVal = reader.GetInt32(index);
+            var targetType = Nullable.GetUnderlyingType(Property.PropertyType) ?? Property.PropertyType;
+            if (targetType.IsEnum)
+                Property.SetValue(value, Enum.ToObject(targetType, intVal), null);
+            else
+                Property.SetValue(value, intVal, null);
+        }
+
+        public override object? Write(object value)
+        {
+            var val = Property.GetValue(value);
+            if (val == null) return null;
+            var targetType = Nullable.GetUnderlyingType(Property.PropertyType) ?? Property.PropertyType;
+            if (targetType.IsEnum)
+                return (int)val;
+            return val;
         }
     }
 
