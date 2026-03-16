@@ -56,10 +56,12 @@ namespace Birko.Data.SQL.Fields
             return false; // value-type
         }
 
-        public static AbstractField CreateAbstractField(System.Reflection.PropertyInfo property, Birko.Data.SQL.Attributes.Field[]? fields = null)
+        public static AbstractField? CreateAbstractField(System.Reflection.PropertyInfo property, Birko.Data.SQL.Attributes.Field[]? fields = null)
         {
-            // Skip properties marked with [IgnoreField]
+            // Skip properties marked with [IgnoreField] or [NotMapped]
             if (fields != null && fields.Any(f => f is Birko.Data.SQL.Attributes.IgnoreField))
+                return null;
+            if (property.GetCustomAttributes(typeof(System.ComponentModel.DataAnnotations.Schema.NotMappedAttribute), true).Any())
                 return null;
 
             var isNullable = IsNullable(property.PropertyType);
@@ -72,6 +74,7 @@ namespace Birko.Data.SQL.Fields
             int? precision = null;
             int? maxLength = null;
 
+            // Read Birko.Data.SQL.Attributes
             if (fields != null && fields.Any())
             {
                 foreach (var field in fields.Where(x => x != null))
@@ -110,7 +113,51 @@ namespace Birko.Data.SQL.Fields
                         scale = scaleField.Scale;
                     }
                 }
+            }
 
+            // Read System.ComponentModel.DataAnnotations attributes (alongside Birko attributes)
+            // Birko attributes take precedence where both are specified
+            var birkoNameOverride = fields != null && fields.Any(f => f is Birko.Data.SQL.Attributes.NamedField nf && !string.IsNullOrEmpty(nf.Name));
+            var dataAnnotations = property.GetCustomAttributes(true);
+
+            foreach (var attr in dataAnnotations)
+            {
+                if (!birkoNameOverride && attr is System.ComponentModel.DataAnnotations.Schema.ColumnAttribute columnAttr)
+                {
+                    if (!string.IsNullOrEmpty(columnAttr.Name))
+                    {
+                        name = columnAttr.Name;
+                    }
+                }
+                if (attr is System.ComponentModel.DataAnnotations.KeyAttribute)
+                {
+                    primary = true;
+                }
+                if (attr is System.ComponentModel.DataAnnotations.RequiredAttribute)
+                {
+                    required = true;
+                }
+                if (attr is System.ComponentModel.DataAnnotations.MaxLengthAttribute maxLenAttr)
+                {
+                    if (maxLength == null)
+                    {
+                        maxLength = maxLenAttr.Length;
+                    }
+                }
+                if (attr is System.ComponentModel.DataAnnotations.StringLengthAttribute strLenAttr)
+                {
+                    if (maxLength == null)
+                    {
+                        maxLength = strLenAttr.MaximumLength;
+                    }
+                }
+                if (attr is System.ComponentModel.DataAnnotations.Schema.DatabaseGeneratedAttribute dbGenAttr)
+                {
+                    if (dbGenAttr.DatabaseGeneratedOption == System.ComponentModel.DataAnnotations.Schema.DatabaseGeneratedOption.Identity)
+                    {
+                        autoincrement = true;
+                    }
+                }
             }
 
             // [RequiredField] overrides C# nullability — forces NOT NULL even for nullable types

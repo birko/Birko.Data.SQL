@@ -60,6 +60,22 @@ Extends AsyncDataBaseStore with async bulk operations.
 - `ScaleField(int scale)` - Sets numeric scale
 - `IgnoreField` - Excludes a property from SQL field mapping (skipped during table creation and CRUD operations)
 
+#### DataAnnotations Support (`System.ComponentModel.DataAnnotations`)
+Standard DataAnnotations attributes are recognized alongside Birko attributes. Birko attributes take precedence when both are specified on the same property.
+
+| DataAnnotation | Birko Equivalent | Notes |
+|---|---|---|
+| `[Table("name")]` | `[Table("name")]` | From `Schema` namespace |
+| `[Column("name")]` | `[NamedField("name")]` | `[NamedField]` takes precedence if both present |
+| `[Key]` | `[PrimaryField]` | |
+| `[Required]` | `[RequiredField]` | |
+| `[MaxLength(n)]` | `[MaxLengthField(n)]` | Birko value takes precedence |
+| `[StringLength(n)]` | `[MaxLengthField(n)]` | Birko value takes precedence |
+| `[DatabaseGenerated(Identity)]` | `[IncrementField]` | From `Schema` namespace |
+| `[NotMapped]` | `[IgnoreField]` | From `Schema` namespace |
+
+No DataAnnotations equivalent exists for `[UniqueField]`, `[PrecisionField]`, or `[ScaleField]`.
+
 #### Models
 - `ColumnModel` - Represents a table column
 - `TableModel` - Represents a database table

@@ -68,7 +68,18 @@ public class CustomerStore : DataBaseStore<SqlConnection, Customer>, IStore<Cust
 - **MaxLengthField(int maxLength)** - Sets VARCHAR length for string fields
 - **PrecisionField(int precision)** - Sets numeric precision
 - **ScaleField(int scale)** - Sets numeric scale
-- **IgnoreField** - Excludes a property from SQL field mapping (skipped during table creation and CRUD operations)
+- **IgnoreField** - Excludes a property from SQL field mapping
+
+### DataAnnotations Support
+
+Standard `System.ComponentModel.DataAnnotations` attributes are recognized alongside Birko attributes (Birko takes precedence when both are specified):
+
+- `[Table]` / `[Column]` - Table and column name mapping
+- `[Key]` - Primary key (same as `[PrimaryField]`)
+- `[Required]` - NOT NULL (same as `[RequiredField]`)
+- `[MaxLength]` / `[StringLength]` - VARCHAR length (same as `[MaxLengthField]`)
+- `[DatabaseGenerated(Identity)]` - Auto-increment (same as `[IncrementField]`)
+- `[NotMapped]` - Exclude from mapping (same as `[IgnoreField]`)
 
 ### Settings
 
