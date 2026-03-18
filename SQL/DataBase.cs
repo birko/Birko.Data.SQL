@@ -323,6 +323,9 @@ namespace Birko.Data.SQL
                         ParseConditionExpression(binaryExpression.Right, right, exprType);
                         if (parent != null)
                         {
+                            // Transfer the OR/AND flag to the parent so the SQL generator
+                            // knows to join subconditions with OR instead of AND.
+                            parent.IsOr = isOR;
                             parent.SubConditions = (parent.SubConditions ?? []).Union(new[] { left, right });
                             return new[] { parent };
                         }
