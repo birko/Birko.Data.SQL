@@ -39,8 +39,13 @@ namespace Birko.Data.SQL
         {
             return _tableCache.GetOrAdd(type, t =>
             {
-                IEnumerable<object> attrs = t.GetCustomAttributes(typeof(Birko.Data.SQL.Attributes.Table), true)
-                    .Concat(t.GetCustomAttributes(typeof(System.ComponentModel.DataAnnotations.Schema.TableAttribute), true));
+                // Check both Birko and DataAnnotations table attributes.
+                // Use name-based matching for Birko.Data.SQL.Attributes.Table to handle
+                // shared-project type identity issues (same attribute compiled into multiple assemblies).
+                IEnumerable<object> attrs = t.GetCustomAttributes(true)
+                    .Where(a => a is Birko.Data.SQL.Attributes.Table
+                             || a is System.ComponentModel.DataAnnotations.Schema.TableAttribute
+                             || a.GetType().FullName == "Birko.Data.SQL.Attributes.Table");
                 if (attrs != null)
                 {
                     foreach (Attribute attr in attrs)
@@ -53,6 +58,11 @@ namespace Birko.Data.SQL
                         else if (attr is System.ComponentModel.DataAnnotations.Schema.TableAttribute dataTable)
                         {
                             tableName = dataTable.Name;
+                        }
+                        else if (attr.GetType().FullName == "Birko.Data.SQL.Attributes.Table")
+                        {
+                            // Cross-assembly shared-project attribute — read Name via reflection
+                            tableName = attr.GetType().GetProperty("Name")?.GetValue(attr) as string;
                         }
                         if (!string.IsNullOrEmpty(tableName))
                         {

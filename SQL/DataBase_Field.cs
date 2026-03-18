@@ -29,7 +29,76 @@ namespace Birko.Data.SQL
 
         public static IEnumerable<AbstractField> LoadField(PropertyInfo field)
         {
-            Birko.Data.SQL.Attributes.Field[] fieldAttrs = (Birko.Data.SQL.Attributes.Field[])field.GetCustomAttributes(typeof(Birko.Data.SQL.Attributes.Field), true);
+            // Direct cast works when attribute type identity matches (same compilation unit).
+            var directAttrs = field.GetCustomAttributes(typeof(Birko.Data.SQL.Attributes.Field), true);
+            Birko.Data.SQL.Attributes.Field[] fieldAttrs;
+
+            if (directAttrs.Length > 0)
+            {
+                fieldAttrs = (Birko.Data.SQL.Attributes.Field[])directAttrs;
+            }
+            else
+            {
+                // Cross-assembly shared-project fallback: attribute compiled into a different assembly
+                // has a different CLR type identity. Reconstruct equivalent local attributes via reflection.
+                var crossAttrs = field.GetCustomAttributes(true)
+                    .Where(a => a.GetType().FullName?.StartsWith("Birko.Data.SQL.Attributes.") == true
+                             && !(a is Birko.Data.SQL.Attributes.Field))
+                    .ToList();
+
+                if (crossAttrs.Count == 0)
+                {
+                    fieldAttrs = Array.Empty<Birko.Data.SQL.Attributes.Field>();
+                }
+                else
+                {
+                    var rebuilt = new List<Birko.Data.SQL.Attributes.Field>();
+                    foreach (var attr in crossAttrs)
+                    {
+                        var typeName = attr.GetType().Name;
+                        switch (typeName)
+                        {
+                            case "PrimaryField":
+                                rebuilt.Add(new Birko.Data.SQL.Attributes.PrimaryField());
+                                break;
+                            case "UniqueField":
+                                rebuilt.Add(new Birko.Data.SQL.Attributes.UniqueField());
+                                break;
+                            case "RequiredField":
+                                rebuilt.Add(new Birko.Data.SQL.Attributes.RequiredField());
+                                break;
+                            case "IncrementField":
+                                rebuilt.Add(new Birko.Data.SQL.Attributes.IncrementField());
+                                break;
+                            case "IgnoreField":
+                                rebuilt.Add(new Birko.Data.SQL.Attributes.IgnoreField());
+                                break;
+                            case "NamedField":
+                                var name = attr.GetType().GetProperty("Name")?.GetValue(attr) as string;
+                                if (!string.IsNullOrEmpty(name))
+                                    rebuilt.Add(new Birko.Data.SQL.Attributes.NamedField(name));
+                                break;
+                            case "PrecisionField":
+                                var prec = attr.GetType().GetProperty("Precision")?.GetValue(attr);
+                                rebuilt.Add(new Birko.Data.SQL.Attributes.PrecisionField(prec is int p ? p : 0));
+                                break;
+                            case "ScaleField":
+                                var sc = attr.GetType().GetProperty("Scale")?.GetValue(attr);
+                                rebuilt.Add(new Birko.Data.SQL.Attributes.ScaleField(sc is int s ? s : 0));
+                                break;
+                            case "MaxLengthField":
+                                var ml = attr.GetType().GetProperty("MaxLength")?.GetValue(attr);
+                                rebuilt.Add(new Birko.Data.SQL.Attributes.MaxLengthField(ml is int m ? m : 0));
+                                break;
+                            default:
+                                // Unknown attribute subtype — skip (property still gets mapped without attributes)
+                                break;
+                        }
+                    }
+                    fieldAttrs = rebuilt.ToArray();
+                }
+            }
+
             var tableField = Fields.AbstractField.CreateAbstractField(field, fieldAttrs);
             return tableField != null ? new[] { tableField } : Array.Empty<AbstractField>();
         }
