@@ -129,6 +129,15 @@ namespace Birko.Data.SQL.Connectors
         /// </summary>
         private string BuildSubConditions(Conditions.Condition condition, DbCommand command)
         {
+            // Pass the parent's IsOr flag to subconditions so they're joined correctly.
+            // The parser sets IsOr on the parent, but subconditions default to IsOr=false.
+            if (condition.IsOr && condition.SubConditions != null)
+            {
+                foreach (var sub in condition.SubConditions)
+                {
+                    sub.IsOr = true;
+                }
+            }
             var subConditionsSql = ConditionDefinition(condition.SubConditions!, command);
             var needsParens = condition.SubConditions!.Count() > 1;
             return needsParens ? $"({subConditionsSql})" : subConditionsSql;
