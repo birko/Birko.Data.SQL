@@ -507,10 +507,17 @@ namespace Birko.Data.SQL
                     container = EvaluateExpression(m.Expression);
                 }
 
-                if (m.Member is FieldInfo fi)
-                    return fi.GetValue(container);
-                if (m.Member is PropertyInfo pi)
-                    return pi.GetValue(container);
+                try
+                {
+                    if (m.Member is FieldInfo fi)
+                        return fi.GetValue(container);
+                    if (m.Member is PropertyInfo pi)
+                        return pi.GetValue(container);
+                }
+                catch (TargetException)
+                {
+                    // Non-static member on null container — fall through to lambda compilation
+                }
             }
 
             if (expr is NewArrayExpression na && na.NodeType == ExpressionType.NewArrayInit)
