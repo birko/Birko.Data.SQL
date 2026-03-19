@@ -7,7 +7,8 @@ using Birko.Data.SQL.Connectors;
 using Birko.Data.Models;
 using Birko.Data.SQL.Stores;
 using Birko.Data.Stores;
-using PasswordSettings = Birko.Data.Stores.PasswordSettings;
+using Birko.Configuration;
+using PasswordSettings = Birko.Configuration.PasswordSettings;
 
 /// <summary>
 /// SQL Unit of Work implementation using ADO.NET DbTransaction.

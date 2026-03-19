@@ -8,7 +8,7 @@ using System.Reflection;
 using System.Text;
 using System.Collections.Concurrent;
 using System.Data;
-using Settings = Birko.Data.Stores.Settings;
+using Birko.Configuration;
 
 namespace Birko.Data.SQL
 {

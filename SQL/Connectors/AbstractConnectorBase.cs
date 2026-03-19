@@ -5,7 +5,7 @@ using System.Data.Common;
 using System.Linq;
 using System.Text;
 using Birko.Data.SQL.Connectors.Strategies;
-using PasswordSettings = Birko.Data.Stores.PasswordSettings;
+using PasswordSettings = Birko.Configuration.PasswordSettings;
 
 namespace Birko.Data.SQL.Connectors
 {

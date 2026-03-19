@@ -1,6 +1,7 @@
 using Birko.Data.Repositories;
 using Birko.Data.SQL.Stores;
 using Birko.Data.Stores;
+using Birko.Configuration;
 using System;
 
 namespace Birko.Data.SQL.Repositories
