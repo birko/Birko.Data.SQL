@@ -4,7 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq.Expressions;
 
-namespace Birko.Data.DataBase.Extensions
+namespace Birko.Data.SQL.Extensions
 {
     public static class IDataBaseRepositoryExtensions
     {
