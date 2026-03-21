@@ -1,4 +1,5 @@
 ﻿using Birko.Data.SQL.Fields;
+using Birko.Data.SQL.Tables;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -78,6 +79,7 @@ namespace Birko.Data.SQL
                                 {
                                     field.Value.Table = table;
                                 }
+                                table.Indexes = LoadIndexes(t, table.Fields);
                                 return table;
                             }
                         }
@@ -89,6 +91,70 @@ namespace Birko.Data.SQL
                     throw new Exceptions.TableAttributeException("No table attributes in type");
                 }
             });
+        }
+
+        public static Dictionary<string, IndexDefinition> LoadIndexes(Type type, Dictionary<string, AbstractField> fields)
+        {
+            var indexes = new Dictionary<string, IndexDefinition>();
+
+            foreach (var prop in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+            {
+                // Direct cast
+                var directAttrs = prop.GetCustomAttributes(typeof(Attributes.IndexedField), true)
+                    .OfType<Attributes.IndexedField>();
+
+                // Cross-assembly shared-project fallback
+                var crossAttrs = prop.GetCustomAttributes(true)
+                    .Where(a => a.GetType().FullName == "Birko.Data.SQL.Attributes.IndexedField"
+                             && !(a is Attributes.IndexedField));
+
+                var allAttrs = new List<(string Name, int Order, bool IsDescending)>();
+
+                foreach (var attr in directAttrs)
+                {
+                    allAttrs.Add((attr.Name, attr.Order, attr.IsDescending));
+                }
+
+                foreach (var attr in crossAttrs)
+                {
+                    var attrType = attr.GetType();
+                    var name = attrType.GetProperty("Name")?.GetValue(attr) as string;
+                    var order = attrType.GetProperty("Order")?.GetValue(attr) is int o ? o : 0;
+                    var isDesc = attrType.GetProperty("IsDescending")?.GetValue(attr) is bool d && d;
+                    if (!string.IsNullOrEmpty(name))
+                    {
+                        allAttrs.Add((name!, order, isDesc));
+                    }
+                }
+
+                foreach (var (name, order, isDescending) in allAttrs)
+                {
+                    if (!indexes.TryGetValue(name, out var idx))
+                    {
+                        idx = new IndexDefinition { Name = name };
+                        indexes[name] = idx;
+                    }
+
+                    // Resolve actual column name from field metadata
+                    var field = fields.Values.FirstOrDefault(f => f.Property?.Name == prop.Name);
+                    var columnName = field?.Name ?? prop.Name;
+
+                    idx.Columns.Add(new IndexColumn
+                    {
+                        ColumnName = columnName,
+                        Order = order,
+                        IsDescending = isDescending,
+                    });
+                }
+            }
+
+            // Sort columns by Order within each index
+            foreach (var idx in indexes.Values)
+            {
+                idx.Columns.Sort((a, b) => a.Order.CompareTo(b.Order));
+            }
+
+            return indexes;
         }
 
         public static int Read(DbDataReader reader, object data, int index = 0)

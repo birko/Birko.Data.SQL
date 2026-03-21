@@ -80,4 +80,25 @@ namespace Birko.Data.SQL.Attributes
             Scale = scale;
         }
     }
+
+    /// <summary>
+    /// Marks a property as part of a named database index.
+    /// Multiple properties sharing the same index name form a composite index.
+    /// Use Order to control column position within composite indexes.
+    /// AllowMultiple — a single property can participate in multiple indexes.
+    /// </summary>
+    [System.AttributeUsage(System.AttributeTargets.Property, Inherited = true, AllowMultiple = true)]
+    public class IndexedField : Field
+    {
+        public string Name { get; }
+        public int Order { get; }
+        public bool IsDescending { get; }
+
+        public IndexedField(string name, int order = 0, bool isDescending = false)
+        {
+            Name = name;
+            Order = order;
+            IsDescending = isDescending;
+        }
+    }
 }

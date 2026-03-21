@@ -55,6 +55,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Fields\CharField.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Fields\StringField.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Tables\Table.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Tables\IndexDefinition.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Exceptions\FieldAttributeException.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Exceptions\TableAttributeException.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Models\AbstractLogModel.cs" />
@@ -70,5 +71,6 @@
     <Compile Include="$(MSBuildThisFileDirectory)Stores\AsyncDataBaseBulkStore.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Stores\SqlTransactionContext.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)UnitOfWork\SqlUnitOfWork.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\IndexManagement\SqlIndexManager.cs" />
   </ItemGroup>
 </Project>

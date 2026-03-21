@@ -90,6 +90,13 @@ namespace Birko.Data.SQL
                                 var ml = attr.GetType().GetProperty("MaxLength")?.GetValue(attr);
                                 rebuilt.Add(new Birko.Data.SQL.Attributes.MaxLengthField(ml is int m ? m : 0));
                                 break;
+                            case "IndexedField":
+                                var idxName = attr.GetType().GetProperty("Name")?.GetValue(attr) as string;
+                                var idxOrder = attr.GetType().GetProperty("Order")?.GetValue(attr) is int io ? io : 0;
+                                var idxDesc = attr.GetType().GetProperty("IsDescending")?.GetValue(attr) is bool id && id;
+                                if (!string.IsNullOrEmpty(idxName))
+                                    rebuilt.Add(new Birko.Data.SQL.Attributes.IndexedField(idxName!, idxOrder, idxDesc));
+                                break;
                             default:
                                 // Unknown attribute subtype — skip (property still gets mapped without attributes)
                                 break;

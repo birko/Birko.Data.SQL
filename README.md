@@ -85,6 +85,38 @@ Standard `System.ComponentModel.DataAnnotations` attributes are recognized along
 
 Uses `RemoteSettings` for connection: `Server`, `Port`, `Database`, `UserName`, `Password`
 
+### Index Management
+
+```csharp
+using Birko.Data.SQL.IndexManagement;
+using Birko.Data.SQL.PostgreSQL.IndexManagement;
+using Birko.Data.Patterns.IndexManagement;
+
+// Dialect-specific managers
+var indexManager = new PostgreSqlIndexManager(connector);  // or MSSqlIndexManager, SqLiteIndexManager, MySqlIndexManager
+
+// Same IIndexManager interface as NoSQL providers
+await indexManager.CreateAsync(new IndexDefinition
+{
+    Name = "idx_order_date",
+    Fields = new[] { IndexField.Ascending("CustomerId"), IndexField.Descending("CreatedAt") },
+    Unique = false
+}, scope: "Orders");
+
+// List, check, drop
+var indexes = await indexManager.ListAsync(scope: "Orders");
+bool exists = await indexManager.ExistsAsync("idx_order_date", scope: "Orders");
+await indexManager.DropAsync("idx_order_date", scope: "Orders");
+```
+
+**Dialect-specific SQL generation:**
+| Provider | Catalog View | Quoting |
+|----------|-------------|---------|
+| PostgreSQL | `pg_indexes` + `pg_class` | `"identifier"` |
+| MSSQL | `sys.indexes` + `sys.index_columns` | `[identifier]` |
+| MySQL | `information_schema.statistics` | `` `identifier` `` |
+| SQLite | `sqlite_master` + `PRAGMA index_info` | `"identifier"` |
+
 ## Database Providers
 
 - [Birko.Data.SQL.MSSql](../Birko.Data.SQL.MSSql/) - SQL Server

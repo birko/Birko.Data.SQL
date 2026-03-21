@@ -18,6 +18,10 @@ namespace Birko.Data.SQL.Connectors
             if (tables != null && tables.Any() && tables.Any(x => x != null && x.Fields != null && x.Fields.Count > 0))
             {
                 CreateTable(tables.ToDictionary(x => x.Name, x => x.Fields.Select(y => y.Value)));
+                foreach (var table in tables.Where(x => x.Indexes != null && x.Indexes.Count > 0))
+                {
+                    CreateIndexes(table.Name, table.Indexes!.Values);
+                }
             }
         }
 
@@ -45,6 +49,34 @@ namespace Birko.Data.SQL.Connectors
             {
                 command.ExecuteNonQuery();
             }, true);
+        }
+
+        public virtual void CreateIndexes(string tableName, IEnumerable<Tables.IndexDefinition> indexes)
+        {
+            foreach (var index in indexes)
+            {
+                DoCommandWithTransaction((command) =>
+                {
+                    command.CommandText = CreateIndexSql(tableName, index);
+                }, (command) =>
+                {
+                    command.ExecuteNonQuery();
+                }, true);
+            }
+        }
+
+        public virtual void DropIndexes(string tableName, IEnumerable<Tables.IndexDefinition> indexes)
+        {
+            foreach (var index in indexes)
+            {
+                DoCommandWithTransaction((command) =>
+                {
+                    command.CommandText = DropIndexSql(tableName, index);
+                }, (command) =>
+                {
+                    command.ExecuteNonQuery();
+                }, true);
+            }
         }
     }
 }

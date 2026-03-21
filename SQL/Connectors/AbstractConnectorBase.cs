@@ -18,6 +18,11 @@ namespace Birko.Data.SQL.Connectors
         protected readonly object _lock = new();
         public bool IsInitializing { get; protected set; } = false;
 
+        /// <summary>
+        /// Gets the connection settings for this connector.
+        /// </summary>
+        public PasswordSettings Settings => _settings;
+
         // Strategy pattern for condition building
         private readonly List<IConditionStrategy> _conditionStrategies = new();
 
@@ -190,6 +195,27 @@ namespace Birko.Data.SQL.Connectors
                 }
             }
             return result.ToString();
+        }
+
+        /// <summary>
+        /// Generates a CREATE INDEX SQL statement for the given table and index definition.
+        /// Override in provider-specific connectors if the DDL syntax differs.
+        /// </summary>
+        public virtual string CreateIndexSql(string tableName, Tables.IndexDefinition index)
+        {
+            var columns = string.Join(", ", index.Columns.Select(c =>
+                QuoteIdentifier(c.ColumnName) + (c.IsDescending ? " DESC" : "")));
+
+            return $"CREATE INDEX IF NOT EXISTS {QuoteIdentifier(index.Name)} ON {QuoteIdentifier(tableName)} ({columns})";
+        }
+
+        /// <summary>
+        /// Generates a DROP INDEX SQL statement.
+        /// Override in provider-specific connectors if the DDL syntax differs (e.g. MSSQL).
+        /// </summary>
+        public virtual string DropIndexSql(string tableName, Tables.IndexDefinition index)
+        {
+            return $"DROP INDEX IF EXISTS {QuoteIdentifier(index.Name)}";
         }
 
         /// <summary>

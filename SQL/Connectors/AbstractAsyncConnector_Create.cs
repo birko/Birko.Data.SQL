@@ -15,13 +15,16 @@ namespace Birko.Data.SQL.Connectors
             return CreateTableAsync(DataBase.LoadTables(types), ct);
         }
 
-        public Task CreateTableAsync(IEnumerable<Tables.Table> tables, CancellationToken ct = default)
+        public async Task CreateTableAsync(IEnumerable<Tables.Table> tables, CancellationToken ct = default)
         {
             if (tables != null && tables.Any() && tables.Any(x => x != null && x.Fields != null && x.Fields.Count > 0))
             {
-                return CreateTableAsync(tables.ToDictionary(x => x.Name, x => x.Fields.Select(y => y.Value)), ct);
+                await CreateTableAsync(tables.ToDictionary(x => x.Name, x => x.Fields.Select(y => y.Value)), ct);
+                foreach (var table in tables.Where(x => x.Indexes != null && x.Indexes.Count > 0))
+                {
+                    await CreateIndexesAsync(table.Name, table.Indexes!.Values, ct);
+                }
             }
-            return Task.CompletedTask;
         }
 
         public Task CreateTableAsync(IDictionary<string, IEnumerable<Fields.AbstractField>> tables, CancellationToken ct = default)
@@ -52,6 +55,36 @@ namespace Birko.Data.SQL.Connectors
             {
                 await command.ExecuteNonQueryAsync(ct);
             }, true);
+        }
+
+        public virtual async Task CreateIndexesAsync(string tableName, IEnumerable<Tables.IndexDefinition> indexes, CancellationToken ct = default)
+        {
+            foreach (var index in indexes)
+            {
+                await DoCommandWithTransactionAsync(async (command) =>
+                {
+                    command.CommandText = CreateIndexSql(tableName, index);
+                    await Task.CompletedTask;
+                }, async (command) =>
+                {
+                    await command.ExecuteNonQueryAsync(ct);
+                }, true);
+            }
+        }
+
+        public virtual async Task DropIndexesAsync(string tableName, IEnumerable<Tables.IndexDefinition> indexes, CancellationToken ct = default)
+        {
+            foreach (var index in indexes)
+            {
+                await DoCommandWithTransactionAsync(async (command) =>
+                {
+                    command.CommandText = DropIndexSql(tableName, index);
+                    await Task.CompletedTask;
+                }, async (command) =>
+                {
+                    await command.ExecuteNonQueryAsync(ct);
+                }, true);
+            }
         }
     }
 }

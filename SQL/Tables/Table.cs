@@ -11,6 +11,7 @@ namespace Birko.Data.SQL.Tables
         public string Name { get; set; } = null!;
         public Dictionary<string, Fields.AbstractField> Fields { get; set; } = null!;
         public Type Type { get; set; } = null!;
+        public Dictionary<string, IndexDefinition>? Indexes { get; set; }
 
         public IDictionary<int, string> GetSelectFields(bool withName  = false, bool notAggregate = false)
         {
