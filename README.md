@@ -8,6 +8,7 @@ SQL-specific data access layer providing abstract base classes for SQL database 
 - Typed connector pattern for database connections
 - SQL attributes for table/column mapping
 - Repository base classes for SQL databases
+- Query caching layer with automatic invalidation
 - Automatic connection management via Settings
 
 ## Installation
