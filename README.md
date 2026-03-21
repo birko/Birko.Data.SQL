@@ -118,6 +118,35 @@ await indexManager.DropAsync("idx_order_date", scope: "Orders");
 | MySQL | `information_schema.statistics` | `` `identifier` `` |
 | SQLite | `sqlite_master` + `PRAGMA index_info` | `"identifier"` |
 
+### Query Caching
+
+- **CachedAsyncDataBaseBulkStore\<DB,T\>** - Caching decorator for async bulk stores with automatic invalidation
+
+```csharp
+using Birko.Data.SQL.Stores;
+using Birko.Data.SQL.Caching;
+
+var cacheOptions = new SqlCacheOptions
+{
+    DefaultExpiration = TimeSpan.FromMinutes(10),
+    KeyPrefix = "customers"
+};
+
+var innerStore = new AsyncPostgreSQLBulkStore<Customer>();
+var cachedStore = new CachedAsyncDataBaseBulkStore<NpgsqlConnection, Customer>(
+    innerStore, cache, cacheOptions);
+
+// Reads are served from cache when available
+var customer = await cachedStore.ReadAsync(customerId);
+
+// Writes automatically invalidate affected cache entries
+await cachedStore.UpdateAsync(customer);
+```
+
+Key components:
+- **SqlCacheKeyBuilder** - Generates consistent cache keys from query parameters and filters
+- **SqlCacheOptions** - Configuration for cache TTL, key prefix, and invalidation strategy
+
 ## Database Providers
 
 - [Birko.Data.SQL.MSSql](../Birko.Data.SQL.MSSql/) - SQL Server

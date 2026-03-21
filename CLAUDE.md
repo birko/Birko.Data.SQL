@@ -46,6 +46,13 @@ Extends AsyncDataBaseStore with async bulk operations.
 - `AsyncDataBaseRepository<T,S,DB>` - Async SQL repository
 - `AsyncDataBaseBulkRepository<T,S,DB>` - Async SQL bulk repository
 
+### Query Caching
+- `CachedAsyncDataBaseBulkStore<DB,T>` - Caching decorator for async bulk SQL stores
+- `SqlCacheKeyBuilder` - Generates consistent cache keys from query parameters and filter expressions
+- `SqlCacheOptions` - Configuration for cache TTL, key prefix, and invalidation strategy
+- Automatic cache invalidation on write operations (Create, Update, Delete)
+- Works with any `ICache` implementation (MemoryCache, RedisCache, HybridCache)
+
 ### SQL Components
 
 #### Attributes (`Birko.Data.SQL.Attributes`)
