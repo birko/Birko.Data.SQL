@@ -83,58 +83,64 @@ namespace Birko.Data.SQL.Connectors
             }
         }
 
-        private async Task RunCommandTransactionAsync(Func<DbCommand, Task> createCommand, Func<DbCommand, Task> executeCommand, CancellationToken ct)
+        private Task RunCommandTransactionAsync(Func<DbCommand, Task> createCommand, Func<DbCommand, Task> executeCommand, CancellationToken ct)
         {
-            await using var db = CreateConnection(_settings);
-            await db.OpenAsync(ct);
-            await using var transaction = await db.BeginTransactionAsync(ct);
-            string? commandText = null;
-            try
+            return ExecuteWithRetryAsync(async () =>
             {
-                await using (var command = db.CreateCommand())
+                await using var db = CreateConnection(_settings);
+                await db.OpenAsync(ct);
+                await using var transaction = await db.BeginTransactionAsync(ct);
+                string? commandText = null;
+                try
                 {
-                    command.Transaction = transaction;
-                    if (createCommand != null) await createCommand.Invoke(command);
-                    commandText = DataBase.GetGeneratedQuery(command);
-                    OnExecute?.Invoke(commandText);
-                    if (executeCommand != null) await executeCommand.Invoke(command);
+                    await using (var command = db.CreateCommand())
+                    {
+                        command.Transaction = transaction;
+                        if (createCommand != null) await createCommand.Invoke(command);
+                        commandText = DataBase.GetGeneratedQuery(command);
+                        OnExecute?.Invoke(commandText);
+                        if (executeCommand != null) await executeCommand.Invoke(command);
+                    }
+                    await transaction.CommitAsync(ct);
                 }
-                await transaction.CommitAsync(ct);
-            }
-            catch (Exception ex)
-            {
-                await transaction.RollbackAsync(ct);
-                InitException(ex, commandText);
-            }
-            finally
-            {
-                await db.CloseAsync();
-            }
+                catch (Exception ex)
+                {
+                    await transaction.RollbackAsync(ct);
+                    InitException(ex, commandText);
+                }
+                finally
+                {
+                    await db.CloseAsync();
+                }
+            }, ct);
         }
 
-        private async Task RunCommandAsync(Func<DbCommand, Task> createCommand, Func<DbCommand, Task> executeCommand, CancellationToken ct)
+        private Task RunCommandAsync(Func<DbCommand, Task> createCommand, Func<DbCommand, Task> executeCommand, CancellationToken ct)
         {
-            await using var db = CreateConnection(_settings);
-            await db.OpenAsync(ct);
-            string? commandText = null;
-            try
+            return ExecuteWithRetryAsync(async () =>
             {
-                await using (var command = db.CreateCommand())
+                await using var db = CreateConnection(_settings);
+                await db.OpenAsync(ct);
+                string? commandText = null;
+                try
                 {
-                    if (createCommand != null) await createCommand.Invoke(command);
-                    commandText = DataBase.GetGeneratedQuery(command);
-                    OnExecute?.Invoke(commandText);
-                    if (executeCommand != null) await executeCommand.Invoke(command);
+                    await using (var command = db.CreateCommand())
+                    {
+                        if (createCommand != null) await createCommand.Invoke(command);
+                        commandText = DataBase.GetGeneratedQuery(command);
+                        OnExecute?.Invoke(commandText);
+                        if (executeCommand != null) await executeCommand.Invoke(command);
+                    }
                 }
-            }
-            catch (Exception ex)
-            {
-                InitException(ex, commandText);
-            }
-            finally
-            {
-                await db.CloseAsync();
-            }
+                catch (Exception ex)
+                {
+                    InitException(ex, commandText);
+                }
+                finally
+                {
+                    await db.CloseAsync();
+                }
+            }, ct);
         }
 
         private async IAsyncEnumerable<IEnumerable<object>> RunReaderCommandAsync(Func<DbCommand, Task> createCommand, Func<DbDataReader, Task<IEnumerable<object>>> transformFunction)

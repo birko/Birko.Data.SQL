@@ -157,56 +157,62 @@ namespace Birko.Data.SQL.Connectors
 
         private void RunCommandTransaction(Action<DbCommand> createCommand, Action<DbCommand> executeCommand)
         {
-            using var db = CreateConnection(_settings);
-            db.Open();
-            using var transaction = db.BeginTransaction();
-            string? commandText = null;
-            try
+            ExecuteWithRetry(() =>
             {
-                using (var command = db.CreateCommand())
+                using var db = CreateConnection(_settings);
+                db.Open();
+                using var transaction = db.BeginTransaction();
+                string? commandText = null;
+                try
                 {
-                    command.Transaction = transaction;
-                    createCommand?.Invoke(command);
-                    commandText = DataBase.GetGeneratedQuery(command);
-                    OnExecute?.Invoke(commandText);
-                    executeCommand?.Invoke(command);
+                    using (var command = db.CreateCommand())
+                    {
+                        command.Transaction = transaction;
+                        createCommand?.Invoke(command);
+                        commandText = DataBase.GetGeneratedQuery(command);
+                        OnExecute?.Invoke(commandText);
+                        executeCommand?.Invoke(command);
+                    }
+                    transaction.Commit();
                 }
-                transaction.Commit();
-            }
-            catch (Exception ex)
-            {
-                transaction.Rollback();
-                InitException(ex, commandText);
-            }
-            finally
-            {
-                db.Close();
-            }
+                catch (Exception ex)
+                {
+                    transaction.Rollback();
+                    InitException(ex, commandText);
+                }
+                finally
+                {
+                    db.Close();
+                }
+            });
         }
 
         private void RunCommand(Action<DbCommand> createCommand, Action<DbCommand> executeCommand)
         {
-            using var db = CreateConnection(_settings);
-            db.Open();
-            string? commandText = null;
-            try
+            ExecuteWithRetry(() =>
             {
-                using (var command = db.CreateCommand())
+                using var db = CreateConnection(_settings);
+                db.Open();
+                string? commandText = null;
+                try
                 {
-                    createCommand?.Invoke(command);
-                    commandText = DataBase.GetGeneratedQuery(command);
-                    OnExecute?.Invoke(commandText);
-                    executeCommand?.Invoke(command);
+                    using (var command = db.CreateCommand())
+                    {
+                        createCommand?.Invoke(command);
+                        commandText = DataBase.GetGeneratedQuery(command);
+                        OnExecute?.Invoke(commandText);
+                        executeCommand?.Invoke(command);
+                    }
                 }
-            }
-            catch (Exception ex)
-            {
-                InitException(ex, commandText);
-            }
-            finally
-            {
-                db.Close();
-            }
+                catch (Exception ex)
+                {
+                    InitException(ex, commandText);
+                }
+                finally
+                {
+                    db.Close();
+                }
+            });
         }
 
         private IEnumerable<IEnumerable<object>> RunReaderCommand(Action<DbCommand> createCommand, Func<DbDataReader, IEnumerable<object>> transformFunction)

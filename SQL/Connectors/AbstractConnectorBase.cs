@@ -4,6 +4,8 @@ using System.Data;
 using System.Data.Common;
 using System.Linq;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using Birko.Data.SQL.Connectors.Strategies;
 using PasswordSettings = Birko.Configuration.PasswordSettings;
 
@@ -22,6 +24,78 @@ namespace Birko.Data.SQL.Connectors
         /// Gets the connection settings for this connector.
         /// </summary>
         public PasswordSettings Settings => _settings;
+
+        /// <summary>
+        /// Retry policy for transient failures (deadlocks, timeouts, connection drops).
+        /// Set to <see cref="RetryPolicy.None"/> to disable retries. Default is no retries.
+        /// </summary>
+        public RetryPolicy RetryPolicy { get; set; } = RetryPolicy.None;
+
+        /// <summary>
+        /// Determines whether an exception is transient and the operation should be retried.
+        /// Override in provider-specific connectors to detect provider-specific transient errors
+        /// (e.g., SQL Server error 1205 for deadlocks, PostgreSQL 40P01, MySQL 1213).
+        /// </summary>
+        public virtual bool IsTransientException(Exception ex)
+        {
+            if (ex is TimeoutException) return true;
+            if (ex is DbException dbEx && dbEx.IsTransient) return true;
+            return false;
+        }
+
+        /// <summary>
+        /// Executes an action with retry logic for transient failures.
+        /// </summary>
+        protected void ExecuteWithRetry(Action action, string? commandText = null)
+        {
+            var policy = RetryPolicy;
+            if (policy.MaxRetries <= 0)
+            {
+                action();
+                return;
+            }
+
+            for (int attempt = 0; ; attempt++)
+            {
+                try
+                {
+                    action();
+                    return;
+                }
+                catch (Exception ex) when (attempt < policy.MaxRetries && IsTransientException(ex))
+                {
+                    var delay = policy.GetDelay(attempt + 1);
+                    Thread.Sleep(delay);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Executes an async action with retry logic for transient failures.
+        /// </summary>
+        protected async Task ExecuteWithRetryAsync(Func<Task> action, CancellationToken ct = default, string? commandText = null)
+        {
+            var policy = RetryPolicy;
+            if (policy.MaxRetries <= 0)
+            {
+                await action().ConfigureAwait(false);
+                return;
+            }
+
+            for (int attempt = 0; ; attempt++)
+            {
+                try
+                {
+                    await action().ConfigureAwait(false);
+                    return;
+                }
+                catch (Exception ex) when (attempt < policy.MaxRetries && IsTransientException(ex))
+                {
+                    var delay = policy.GetDelay(attempt + 1);
+                    await Task.Delay(delay, ct).ConfigureAwait(false);
+                }
+            }
+        }
 
         // Strategy pattern for condition building
         private readonly List<IConditionStrategy> _conditionStrategies = new();
