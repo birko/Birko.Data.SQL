@@ -72,8 +72,5 @@
     <Compile Include="$(MSBuildThisFileDirectory)Stores\SqlTransactionContext.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)UnitOfWork\SqlUnitOfWork.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\IndexManagement\SqlIndexManager.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Caching\SqlCacheKeyBuilder.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Caching\SqlCacheOptions.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Stores\CachedAsyncDataBaseBulkStore.cs" />
   </ItemGroup>
 </Project>
