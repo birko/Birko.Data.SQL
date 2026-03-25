@@ -31,7 +31,7 @@ namespace Birko.Data.SQL.Connectors
 
         public long SelectCount(IEnumerable<Tables.Table> tables, IEnumerable<Conditions.Condition>? conditions = null)
         {
-            return (tables != null) ? SelectCount(tables.Select(x => x.Name), conditions) : 0;
+            return (tables != null) ? SelectCount(tables.Where(x => x != null).Select(x => x.Name), conditions) : 0;
         }
 
         public long SelectCount(IEnumerable<string> tableNames, IEnumerable<Conditions.Condition>? conditions = null)

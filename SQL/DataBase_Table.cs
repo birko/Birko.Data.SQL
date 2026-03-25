@@ -14,6 +14,27 @@ namespace Birko.Data.SQL
     public static partial class DataBase
     {
         private static readonly ConcurrentDictionary<Type, Tables.Table> _tableCache = new();
+        private static readonly ConcurrentDictionary<Type, string> _tableNameOverrides = new();
+
+        /// <summary>
+        /// Register a table name for a model type (used by fluent mapping systems).
+        /// This takes precedence over attribute-based discovery when no [Table] attribute is present.
+        /// </summary>
+        public static void RegisterTableName(Type modelType, string tableName)
+        {
+            _tableNameOverrides[modelType] = tableName;
+            // Invalidate cache so LoadTable picks up the override
+            _tableCache.TryRemove(modelType, out _);
+        }
+
+        /// <summary>
+        /// Register table names for all model mappings in the given registry.
+        /// </summary>
+        public static void RegisterTableNames(IEnumerable<KeyValuePair<Type, string>> mappings)
+        {
+            foreach (var (type, name) in mappings)
+                RegisterTableName(type, name);
+        }
 
         public static IEnumerable<Tables.Table> LoadTables(IEnumerable<Type> types)
         {
@@ -84,12 +105,27 @@ namespace Birko.Data.SQL
                             }
                         }
                     }
-                    return null!;
                 }
-                else
+
+                // Fallback: check fluent mapping overrides (registered via RegisterTableName)
+                if (_tableNameOverrides.TryGetValue(t, out var overrideName))
                 {
-                    throw new Exceptions.TableAttributeException("No table attributes in type");
+                    var table = new Tables.Table()
+                    {
+                        Name = overrideName,
+                        Type = t,
+                        Fields = LoadFields(t).ToDictionary(x => x.Name),
+                    };
+                    if (table.Fields != null && table.Fields.Any())
+                    {
+                        foreach (var field in table.Fields)
+                            field.Value.Table = table;
+                        table.Indexes = LoadIndexes(t, table.Fields);
+                        return table;
+                    }
                 }
+
+                return null!;
             });
         }
 

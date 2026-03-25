@@ -464,13 +464,17 @@ namespace Birko.Data.SQL
                             if (memberExpression.Expression is ConstantExpression constantExpression)
                             {
                                 Type type = constantExpression.Value!.GetType();
-                                var value = type.InvokeMember(memberExpression.Member.Name, BindingFlags.GetField | BindingFlags.GetProperty, null, constantExpression.Value, null);
+                                var value = type.InvokeMember(memberExpression.Member.Name, BindingFlags.GetField | BindingFlags.GetProperty | BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, constantExpression.Value, null);
                                 parent.Values = (!(value is string) && (value is IEnumerable)) ? (IEnumerable)value : new[] { value };
                             }
-                            //else if (memberExpression.Expression != null)
-                            //{
-                            //    ParseConditionExpression(memberExpression.Expression, parent); // not resending type here
-                            //}
+                            else if (memberExpression.Expression != null && !ContainsParameter(memberExpression))
+                            {
+                                // Nested member access on closure (e.g., closure.request.Login)
+                                var value = EvaluateExpression(memberExpression);
+                                parent.Values = (value != null && !(value is string) && (value is IEnumerable enumerable))
+                                    ? enumerable
+                                    : new[] { value };
+                            }
                             else
                             {
                                 IEnumerable<object>? vals = InvokeExpression(expr);
@@ -520,6 +524,22 @@ namespace Birko.Data.SQL
                 }
             }
 
+            // Method calls on evaluated objects (e.g., value.ToLowerInvariant(), list.Contains(x))
+            if (expr is MethodCallExpression mce)
+            {
+                object? instance = mce.Object != null ? EvaluateExpression(mce.Object) : null;
+                var args = new object?[mce.Arguments.Count];
+                for (int i = 0; i < mce.Arguments.Count; i++)
+                    args[i] = EvaluateExpression(mce.Arguments[i]);
+                return mce.Method.Invoke(instance, args);
+            }
+
+            // Unary conversions (e.g., (object)value)
+            if (expr is UnaryExpression ue && ue.NodeType == ExpressionType.Convert)
+            {
+                return EvaluateExpression(ue.Operand);
+            }
+
             if (expr is NewArrayExpression na && na.NodeType == ExpressionType.NewArrayInit)
             {
                 var elementType = na.Type.GetElementType();
@@ -534,15 +554,45 @@ namespace Birko.Data.SQL
                 return list;
             }
 
-            // Use expression string as cache key (Expression doesn't implement GetHashCode/Equals)
-            var cacheKey = expr.ToString();
-            var func = _expressionCache.GetOrAdd(cacheKey, _ =>
+            // Fallback: compile as parameterless lambda — but only if the expression
+            // does not reference any unbound ParameterExpressions (lambda parameters like 'u').
+            if (!ContainsParameter(expr))
             {
-                var lambda = Expression.Lambda(expr);
-                return (Func<object>)lambda.Compile();
-            });
+                var cacheKey = expr.ToString();
+                var func = _expressionCache.GetOrAdd(cacheKey, _ =>
+                {
+                    var lambda = Expression.Lambda(expr);
+                    return (Func<object>)lambda.Compile();
+                });
+                return func();
+            }
 
-            return func();
+            return null;
+        }
+
+        /// <summary>
+        /// Checks whether the expression tree contains any ParameterExpression (lambda parameters).
+        /// Expressions with unbound parameters cannot be compiled as parameterless lambdas.
+        /// </summary>
+        private static bool ContainsParameter(Expression expr)
+        {
+            if (expr is ParameterExpression)
+                return true;
+            if (expr is MemberExpression me)
+                return me.Expression != null && ContainsParameter(me.Expression);
+            if (expr is MethodCallExpression mc)
+            {
+                if (mc.Object != null && ContainsParameter(mc.Object))
+                    return true;
+                return mc.Arguments.Any(ContainsParameter);
+            }
+            if (expr is UnaryExpression ue)
+                return ContainsParameter(ue.Operand);
+            if (expr is BinaryExpression be)
+                return ContainsParameter(be.Left) || ContainsParameter(be.Right);
+            if (expr is ConditionalExpression ce)
+                return ContainsParameter(ce.Test) || ContainsParameter(ce.IfTrue) || ContainsParameter(ce.IfFalse);
+            return false;
         }
 
         private static IEnumerable<object>? InvokeExpression(Expression expr)
