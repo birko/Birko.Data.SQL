@@ -10,41 +10,20 @@ using PasswordSettings = Birko.Configuration.PasswordSettings;
 
 namespace Birko.Data.SQL.Connectors
 {
-    public delegate void InitAsyncConnector(AbstractAsyncConnector connector);
-    public delegate void OnAsyncException(Exception ex, string? commandText);
-    public delegate void OnAsyncExecute(string commandText);
-
-    public abstract partial class AbstractAsyncConnector : AbstractConnectorBase
+    /// <summary>
+    /// Abstract async connector that extends <see cref="AbstractConnector"/> with native async
+    /// command execution methods. Inherits all sync methods, events, and external transaction support.
+    /// </summary>
+    public abstract partial class AbstractAsyncConnector : AbstractConnector
     {
-        public event InitAsyncConnector? OnInit;
-        public event OnAsyncException? OnException;
-        public event OnAsyncExecute? OnExecute;
-
         public AbstractAsyncConnector(PasswordSettings settings) : base(settings)
         {
         }
 
-        public virtual void InitException(Exception ex, string? commandText)
+        public virtual Task DoInitAsync(CancellationToken ct = default)
         {
-            if (OnException != null)
-            {
-                OnException.Invoke(ex, commandText);
-            }
-            else
-            {
-                throw ex;
-            }
-        }
-
-        public virtual async Task DoInitAsync(CancellationToken ct = default)
-        {
-            if (!IsInitializing)
-            {
-                IsInitializing = true;
-                OnInit?.Invoke(this);
-                IsInitializing = false;
-                await Task.CompletedTask;
-            }
+            DoInit();
+            return Task.CompletedTask;
         }
 
         public virtual Task DoCommandAsync(Func<DbCommand, Task> createCommand, Func<DbCommand, Task> executeCommand, bool isLock = false, CancellationToken ct = default)
@@ -98,7 +77,7 @@ namespace Birko.Data.SQL.Connectors
                         command.Transaction = transaction;
                         if (createCommand != null) await createCommand.Invoke(command);
                         commandText = DataBase.GetGeneratedQuery(command);
-                        OnExecute?.Invoke(commandText);
+                        InvokeOnExecute(commandText);
                         if (executeCommand != null) await executeCommand.Invoke(command);
                     }
                     await transaction.CommitAsync(ct);
@@ -128,7 +107,7 @@ namespace Birko.Data.SQL.Connectors
                     {
                         if (createCommand != null) await createCommand.Invoke(command);
                         commandText = DataBase.GetGeneratedQuery(command);
-                        OnExecute?.Invoke(commandText);
+                        InvokeOnExecute(commandText);
                         if (executeCommand != null) await executeCommand.Invoke(command);
                     }
                 }
@@ -159,7 +138,7 @@ namespace Birko.Data.SQL.Connectors
                 {
                     if (createCommand != null) await createCommand.Invoke(command);
                     commandText = DataBase.GetGeneratedQuery(command);
-                    OnExecute?.Invoke(command.CommandText);
+                    InvokeOnExecute(command.CommandText);
                 }
                 catch (Exception ex)
                 {

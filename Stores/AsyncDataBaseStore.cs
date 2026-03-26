@@ -3,6 +3,7 @@ using Birko.Data.Stores;
 using Birko.Configuration;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Linq.Expressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -28,6 +29,12 @@ namespace Birko.Data.SQL.Stores
         /// Gets the database connector.
         /// </summary>
         public DB? Connector { get; protected set; }
+
+        /// <summary>
+        /// Gets the connector as an async connector for native async operations.
+        /// Returns null if the connector does not support native async.
+        /// </summary>
+        protected AbstractAsyncConnector? AsyncConnector => Connector as AbstractAsyncConnector;
 
         /// <inheritdoc />
         public SqlTransactionContext? TransactionContext { get; private set; }
@@ -97,14 +104,20 @@ namespace Birko.Data.SQL.Stores
         public override async Task InitAsync(CancellationToken ct = default)
         {
             if (Connector == null) return;
-            await Task.Run(() => Connector.DoInit(), ct);
+            if (AsyncConnector != null)
+                await AsyncConnector.DoInitAsync(ct);
+            else
+                await Task.Run(() => Connector.DoInit(), ct);
         }
 
         /// <inheritdoc />
         public override async Task DestroyAsync(CancellationToken ct = default)
         {
             if (Connector == null) return;
-            await Task.Run(() => Connector.DropTable(new[] { typeof(T) }), ct);
+            if (AsyncConnector != null)
+                await AsyncConnector.DropTableAsync(new[] { typeof(T) }, ct);
+            else
+                await Task.Run(() => Connector.DropTable(new[] { typeof(T) }), ct);
         }
 
         #endregion
@@ -119,7 +132,10 @@ namespace Birko.Data.SQL.Stores
             data.Guid ??= Guid.NewGuid();
             processDelegate?.Invoke(data);
 
-            await Task.Run(() => Connector.Insert(data), ct);
+            if (AsyncConnector != null)
+                await AsyncConnector.InsertAsync(data, ct);
+            else
+                await Task.Run(() => Connector!.Insert(data), ct);
             return data.Guid!.Value;
         }
 
@@ -127,6 +143,15 @@ namespace Birko.Data.SQL.Stores
         public override async Task<T?> ReadAsync(Expression<Func<T, bool>>? filter = null, CancellationToken ct = default)
         {
             if (Connector == null) return default;
+
+            if (AsyncConnector != null)
+            {
+                await foreach (var item in AsyncConnector.SelectAsync(typeof(T), filter as LambdaExpression, null, 1, null))
+                {
+                    if (item is T typed) return typed;
+                }
+                return default;
+            }
 
             var results = await Task.Run(() => Connector.Select(typeof(T), filter as LambdaExpression), ct);
             if (results == null) return default;
@@ -155,7 +180,10 @@ namespace Birko.Data.SQL.Stores
 
             processDelegate?.Invoke(data);
 
-            await Task.Run(() => Connector.Update(data, conditions), ct);
+            if (AsyncConnector != null)
+                await AsyncConnector.UpdateAsync(data, conditions, ct);
+            else
+                await Task.Run(() => Connector!.Update(data, conditions), ct);
         }
 
         /// <inheritdoc />
@@ -169,7 +197,10 @@ namespace Birko.Data.SQL.Stores
                 conditions.Add(SQL.DataBase.CreateCondition(field, data));
             }
 
-            await Task.Run(() => Connector.Delete(typeof(T), conditions), ct);
+            if (AsyncConnector != null)
+                await AsyncConnector.DeleteAsync(typeof(T), conditions, ct);
+            else
+                await Task.Run(() => Connector!.Delete(typeof(T), conditions), ct);
         }
 
         #endregion
@@ -181,7 +212,9 @@ namespace Birko.Data.SQL.Stores
         {
             if (Connector == null) return 0;
 
-            return await Task.Run(() => Connector.SelectCount(typeof(T), filter), ct);
+            if (AsyncConnector != null)
+                return await AsyncConnector.SelectCountAsync(typeof(T), filter, ct);
+            return await Task.Run(() => Connector!.SelectCount(typeof(T), filter), ct);
         }
 
         #endregion

@@ -137,6 +137,37 @@ namespace Birko.Data.SQL
             return fields.First();
         }
 
+        /// <summary>
+        /// Resolves an AbstractField from a non-generic LambdaExpression.
+        /// Used by bulk store PropertyUpdate where generic type args are erased.
+        /// </summary>
+        public static AbstractField GetFieldFromLambda(LambdaExpression expr)
+        {
+            PropertyInfo? propInfo = null;
+            if (expr.Body is UnaryExpression expression)
+            {
+                propInfo = (expression.Operand as MemberExpression)?.Member as PropertyInfo;
+            }
+            else if (expr.Body is MemberExpression memberExpression)
+            {
+                propInfo = memberExpression.Member as PropertyInfo;
+            }
+            if (propInfo == null)
+            {
+                throw new ArgumentException($"Unable to resolve property from expression: {expr}", nameof(expr));
+            }
+            if (propInfo.ReflectedType == typeof(Models.AbstractLogModel))
+            {
+                propInfo = typeof(Models.AbstractDatabaseLogModel).GetProperty(propInfo.Name);
+            }
+            else if (propInfo.ReflectedType == typeof(Models.AbstractModel))
+            {
+                propInfo = typeof(Models.AbstractDatabaseModel).GetProperty(propInfo.Name);
+            }
+            var fields = LoadField(propInfo!);
+            return fields.First();
+        }
+
         public static IEnumerable<AbstractField> GetPrimaryFields(Type type)
         {
             var table = LoadTable(type);

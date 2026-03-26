@@ -155,6 +155,25 @@ Key components:
 - [Birko.Data.SQL.SqLite](../Birko.Data.SQL.SqLite/) - SQLite
 - [Birko.Data.TimescaleDB](../Birko.Data.TimescaleDB/) - TimescaleDB
 
+## Filter-Based Bulk Operations
+
+SQL stores support native filter-based update and delete — single SQL commands instead of per-row operations:
+
+```csharp
+// Native UPDATE ... SET active=0 WHERE category='old' (single SQL command)
+await store.UpdateAsync(
+    x => x.Category == "old",
+    new PropertyUpdate<Product>().Set(x => x.Active, false).Set(x => x.Category, "archived"));
+
+// Native DELETE FROM ... WHERE is_expired=1 (single SQL command)
+await store.DeleteAsync(x => x.IsExpired);
+
+// Complex mutations use read-modify-save fallback
+await store.UpdateAsync(x => x.Price > 100, item => { item.Price *= 0.9m; });
+```
+
+`PropertyUpdate<T>` assignments are translated to SQL SET clauses via the connector's field resolution. The filter expression is converted to a WHERE clause via `DataBase.ParseConditionExpression()`.
+
 ## License
 
 Part of the Birko Framework.

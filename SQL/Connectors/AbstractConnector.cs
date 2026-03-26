@@ -24,6 +24,10 @@ namespace Birko.Data.SQL.Connectors
         {
         }
 
+        /// <summary>
+        /// Invokes the OnExecute event. Can be called from derived classes.
+        /// </summary>
+        protected void InvokeOnExecute(string commandText) => OnExecute?.Invoke(commandText);
 
         public virtual void InitException(Exception ex, string? commandText)
         {

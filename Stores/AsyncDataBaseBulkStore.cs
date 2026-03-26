@@ -40,7 +40,17 @@ namespace Birko.Data.SQL.Stores
         {
             if (Connector == null) return Enumerable.Empty<T>();
 
-            var results = await Task.Run(() => Connector.Select(typeof(T), filter as LambdaExpression, orderBy?.ToDictionary(), limit, offset), ct);
+            if (AsyncConnector != null)
+            {
+                var items = new List<T>();
+                await foreach (var item in AsyncConnector.SelectAsync(typeof(T), filter as LambdaExpression, orderBy?.ToDictionary(), limit, offset))
+                {
+                    if (item is T typed) items.Add(typed);
+                }
+                return items;
+            }
+
+            var results = await Task.Run(() => Connector!.Select(typeof(T), filter as LambdaExpression, orderBy?.ToDictionary(), limit, offset), ct);
             if (results == null) return Enumerable.Empty<T>();
 
             return results.OfType<T>();
@@ -81,6 +91,46 @@ namespace Birko.Data.SQL.Stores
         }
 
         /// <inheritdoc />
+        public virtual async Task UpdateAsync(
+            Expression<Func<T, bool>> filter,
+            Action<T> updateAction,
+            CancellationToken ct = default)
+        {
+            var items = (await ReadAsync(filter, null, null, null, ct)).ToList();
+            foreach (var item in items)
+            {
+                updateAction(item);
+                await UpdateAsync(item, ct: ct);
+            }
+        }
+
+        /// <inheritdoc />
+        public virtual async Task UpdateAsync(
+            Expression<Func<T, bool>> filter,
+            PropertyUpdate<T> updates,
+            CancellationToken ct = default)
+        {
+            if (Connector == null || updates.Assignments.Count == 0) return;
+
+            var table = SQL.DataBase.LoadTable(typeof(T));
+            var fields = new Dictionary<int, string>();
+            var values = new Dictionary<string, object>();
+            int i = 0;
+            foreach (var (property, value) in updates.Assignments)
+            {
+                var field = SQL.DataBase.GetFieldFromLambda(property);
+                fields.Add(i, field.Name);
+                values.Add(field.Name, value ?? DBNull.Value);
+                i++;
+            }
+            var conditions = SQL.DataBase.ParseConditionExpression(filter as LambdaExpression);
+            if (AsyncConnector != null)
+                await AsyncConnector.UpdateAsync(table.Name, fields, values, conditions, false, ct);
+            else
+                await Task.Run(() => Connector!.Update(table.Name, fields, values, conditions), ct);
+        }
+
+        /// <inheritdoc />
         public virtual async Task DeleteAsync(
             IEnumerable<T> data,
             CancellationToken ct = default)
@@ -89,6 +139,18 @@ namespace Birko.Data.SQL.Stores
             {
                 await DeleteAsync(item, ct);
             }
+        }
+
+        /// <inheritdoc />
+        public virtual async Task DeleteAsync(
+            Expression<Func<T, bool>> filter,
+            CancellationToken ct = default)
+        {
+            if (Connector == null) return;
+            if (AsyncConnector != null)
+                await AsyncConnector.DeleteAsync(typeof(T), filter as LambdaExpression, ct);
+            else
+                await Task.Run(() => Connector!.Delete(typeof(T), filter as LambdaExpression), ct);
         }
 
         #endregion
