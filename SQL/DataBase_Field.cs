@@ -171,7 +171,19 @@ namespace Birko.Data.SQL
         public static IEnumerable<AbstractField> GetPrimaryFields(Type type)
         {
             var table = LoadTable(type);
-            return table?.GetPrimaryFields() ?? Array.Empty<AbstractField>();
+            var primaries = table?.GetPrimaryFields()?.ToList();
+
+            // Fallback: if no [PrimaryField] attribute is declared, use the Guid property
+            // (all AbstractModel descendants have Guid). This prevents UPDATE/DELETE
+            // without a WHERE clause for platform-independent models.
+            if ((primaries == null || primaries.Count == 0) && table != null)
+            {
+                var guidField = table.GetFieldByPropertyName("Guid");
+                if (guidField != null)
+                    return new[] { guidField };
+            }
+
+            return (IEnumerable<AbstractField>?)primaries ?? Array.Empty<AbstractField>();
         }
 
         public static int Read(IEnumerable<Fields.AbstractField> fields, DbDataReader reader, object data, int index = 0)
