@@ -260,9 +260,32 @@ namespace Birko.Data.SQL
                 }
                 else if (expr is UnaryExpression unaryExpression)
                 {
-                    if (unaryExpression.NodeType == ExpressionType.Convert)
+                    if (unaryExpression.NodeType == ExpressionType.Convert || unaryExpression.NodeType == ExpressionType.TypeAs)
                     {
                         return ParseConditionExpression(unaryExpression.Operand, parent, exprType);
+                    }
+                    if (unaryExpression.NodeType == ExpressionType.Not)
+                    {
+                        // Not(MemberAccess(MemberAccess(param, Prop), HasValue)) → Prop IS NULL
+                        // C# compiler generates this for `x.NullableProp == null`
+                        if (unaryExpression.Operand is MemberExpression notMember
+                            && notMember.Member.Name == "HasValue"
+                            && notMember.Expression is MemberExpression innerMember
+                            && Nullable.GetUnderlyingType(notMember.Member.ReflectedType!) != null)
+                        {
+                            var condition = parent ?? new Conditions.Condition(null, null);
+                            condition.Type = ConditionType.IsNull;
+                            // Resolve the property name from the inner member (the actual nullable property)
+                            var inner = new Conditions.Condition(null, null);
+                            ParseConditionExpression(innerMember, inner, exprType);
+                            condition.Name = inner.Name;
+                            return new[] { condition };
+                        }
+                        // MemberAccess(MemberAccess(param, Prop), HasValue) without Not → Prop IS NOT NULL
+                        // General Not: recurse and set IsNot on the result
+                        var notCondition = parent ?? new Conditions.Condition(null, null);
+                        notCondition.IsNot = !notCondition.IsNot; // toggle
+                        return ParseConditionExpression(unaryExpression.Operand, notCondition, exprType);
                     }
                     if (parent != null)
                     {
@@ -415,6 +438,21 @@ namespace Birko.Data.SQL
                     }
                     else if (expr is MemberExpression memberExpression)
                     {
+                        // Bare HasValue access: x.NullableProp.HasValue → Prop IS NOT NULL
+                        if (memberExpression.Member.Name == "HasValue"
+                            && memberExpression.Expression is MemberExpression hasValueInner
+                            && memberExpression.Member.ReflectedType != null
+                            && Nullable.GetUnderlyingType(memberExpression.Member.ReflectedType) != null)
+                        {
+                            var condition = parent ?? new Conditions.Condition(null, null);
+                            condition.Type = ConditionType.IsNull;
+                            condition.IsNot = !condition.IsNot; // HasValue without Not = IS NOT NULL
+                            var inner = new Conditions.Condition(null, null);
+                            ParseConditionExpression(hasValueInner, inner, exprType);
+                            condition.Name = inner.Name;
+                            return new[] { condition };
+                        }
+
                         string name = string.Empty;
                         if (
                             exprType != null
@@ -428,12 +466,18 @@ namespace Birko.Data.SQL
                             ParseConditionExpression(memberExpression.Expression, member, exprType);
                             name = member.Name ?? string.Empty;
                         }
+                        // Check for direct parameter access or Convert(param, Interface) — the C# compiler
+                        // generates Convert when accessing interface properties through generic constraints
+                        var isParameterAccess = memberExpression.Expression?.NodeType == ExpressionType.Parameter
+                            || (memberExpression.Expression is UnaryExpression convertExpr
+                                && convertExpr.NodeType == ExpressionType.Convert
+                                && convertExpr.Operand.NodeType == ExpressionType.Parameter);
                         if (
                             exprType != null
                             && memberExpression.Expression != null
                             && memberExpression.Member.ReflectedType != null
                             && memberExpression.Member.ReflectedType.IsAssignableFrom(exprType)
-                            && memberExpression.Expression.NodeType == ExpressionType.Parameter
+                            && isParameterAccess
                         )
                         {
                             var table = LoadTable(exprType);
