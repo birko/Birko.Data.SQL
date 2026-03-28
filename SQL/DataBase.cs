@@ -254,6 +254,24 @@ namespace Birko.Data.SQL
             {
                 if (expr is LambdaExpression lambdaExpression)
                 {
+                    // Handle constant boolean body: _ => true means "no filter" (return empty),
+                    // _ => false means "match nothing" (return impossible condition 1=0).
+                    if (lambdaExpression.Body is ConstantExpression constBody && constBody.Value is bool boolVal)
+                    {
+                        if (boolVal)
+                        {
+                            return Array.Empty<Conditions.Condition>();
+                        }
+                        else
+                        {
+                            // false → WHERE 1=0 — represented as a condition with literal name
+                            var falseCondition = parent ?? new Conditions.Condition(null, null);
+                            falseCondition.Name = "1";
+                            falseCondition.Values = new object[] { 0 };
+                            falseCondition.Type = ConditionType.Equal;
+                            return new[] { falseCondition };
+                        }
+                    }
                     var type = lambdaExpression.Parameters?.FirstOrDefault()?.Type;
                     var res = ParseConditionExpression(lambdaExpression.Body, parent, type);
                     return res;
@@ -344,6 +362,33 @@ namespace Birko.Data.SQL
                         ParseConditionExpression(binaryExpression.Left, left, exprType);
                         var right = new Conditions.Condition(null, null);
                         ParseConditionExpression(binaryExpression.Right, right, exprType);
+
+                        // Handle constant boolean operands in AND/OR:
+                        //   AND: true is identity (skip), false short-circuits (only false)
+                        //   OR:  true short-circuits (skip whole clause), false is identity (skip)
+                        bool leftIsConst = IsConstantBoolCondition(left, out bool leftVal);
+                        bool rightIsConst = IsConstantBoolCondition(right, out bool rightVal);
+
+                        if (leftIsConst && rightIsConst)
+                        {
+                            bool result = isAnd ? (leftVal && rightVal) : (leftVal || rightVal);
+                            return result ? Array.Empty<Conditions.Condition>() : new[] { MakeFalseCondition(parent) };
+                        }
+                        if (leftIsConst)
+                        {
+                            if (isAnd && leftVal) return ReturnSingleSubCondition(parent, right, isOR);
+                            if (isAnd && !leftVal) return new[] { MakeFalseCondition(parent) };
+                            if (isOR && leftVal) return Array.Empty<Conditions.Condition>();
+                            if (isOR && !leftVal) return ReturnSingleSubCondition(parent, right, isOR);
+                        }
+                        if (rightIsConst)
+                        {
+                            if (isAnd && rightVal) return ReturnSingleSubCondition(parent, left, isOR);
+                            if (isAnd && !rightVal) return new[] { MakeFalseCondition(parent) };
+                            if (isOR && rightVal) return Array.Empty<Conditions.Condition>();
+                            if (isOR && !rightVal) return ReturnSingleSubCondition(parent, left, isOR);
+                        }
+
                         if (parent != null)
                         {
                             // Transfer the OR/AND flag to the parent so the SQL generator
@@ -540,6 +585,60 @@ namespace Birko.Data.SQL
                 }
             }
             return Array.Empty<Condition>();
+        }
+
+        /// <summary>
+        /// Checks whether a parsed condition represents a bare constant boolean
+        /// (Name is null/empty, single boolean value, default Equal type).
+        /// Produced when the expression tree contains a literal true/false operand
+        /// such as in <c>_ =&gt; true &amp;&amp; _.DeletedAt == null</c>.
+        /// </summary>
+        private static bool IsConstantBoolCondition(Conditions.Condition condition, out bool value)
+        {
+            value = false;
+            if (!string.IsNullOrEmpty(condition.Name) || condition.SubConditions?.Any() == true)
+                return false;
+            if (condition.Values is IEnumerable<object> vals)
+            {
+                var list = vals.ToList();
+                if (list.Count == 1 && list[0] is bool b)
+                {
+                    value = b;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Creates a WHERE 1=0 condition (always-false) for short-circuiting AND with false.
+        /// </summary>
+        private static Conditions.Condition MakeFalseCondition(Conditions.Condition? parent)
+        {
+            var c = parent ?? new Conditions.Condition(null, null);
+            c.Name = "1";
+            c.Values = new object[] { 0 };
+            c.Type = ConditionType.Equal;
+            return c;
+        }
+
+        /// <summary>
+        /// Unwraps a single surviving subcondition when the other operand of AND/OR was a constant.
+        /// Transfers its content to the parent if present, or returns it standalone.
+        /// </summary>
+        private static IEnumerable<Conditions.Condition> ReturnSingleSubCondition(Conditions.Condition? parent, Conditions.Condition surviving, bool isOr)
+        {
+            if (parent != null)
+            {
+                parent.IsOr = isOr;
+                parent.Name = surviving.Name;
+                parent.Values = surviving.Values;
+                parent.Type = surviving.Type;
+                parent.IsNot = surviving.IsNot;
+                parent.SubConditions = surviving.SubConditions;
+                return new[] { parent };
+            }
+            return new[] { surviving };
         }
 
         private static object? EvaluateExpression(Expression expr)
