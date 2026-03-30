@@ -459,6 +459,23 @@ namespace Birko.Data.SQL
                     }
                     return new[] { condition };
                 }
+                // Bare HasValue access at top level: x.NullableProp.HasValue → Prop IS NOT NULL
+                // Must be checked before the parent != null guard because the lambda body
+                // can be a bare HasValue expression with no parent.
+                if (expr is MemberExpression topMember
+                    && topMember.Member.Name == "HasValue"
+                    && topMember.Expression is MemberExpression topHasValueInner
+                    && topMember.Member.ReflectedType != null
+                    && Nullable.GetUnderlyingType(topMember.Member.ReflectedType) != null)
+                {
+                    var condition = parent ?? new Conditions.Condition(null, null);
+                    condition.Type = ConditionType.IsNull;
+                    condition.IsNot = !condition.IsNot; // HasValue without Not = IS NOT NULL
+                    var inner = new Conditions.Condition(null, null);
+                    ParseConditionExpression(topHasValueInner, inner, exprType);
+                    condition.Name = inner.Name;
+                    return new[] { condition };
+                }
                 if (parent != null)
                 {
                     if (expr is ConstantExpression || expr is MethodCallExpression)
