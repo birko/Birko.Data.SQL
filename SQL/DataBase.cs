@@ -17,6 +17,13 @@ namespace Birko.Data.SQL
         private static readonly ConcurrentDictionary<Type, ConcurrentDictionary<string, AbstractConnector>> _connectors = new();
         private static readonly ConcurrentDictionary<Type, ConcurrentDictionary<string, AbstractAsyncConnector>> _asyncConnectors = new();
         private static readonly ConcurrentDictionary<string, Func<object>> _expressionCache = new();
+
+        /// <summary>
+        /// Extension point for resolving field select names from non-table sources (e.g. views).
+        /// Parameters: (Type exprType, string propertyName, bool withTableName) → field select name or null.
+        /// Set by Birko.Data.SQL.View to break the dependency from SQL → View.
+        /// </summary>
+        public static Func<Type, string, bool, string?>? ResolveFieldSelectName { get; set; }
         private static readonly HashSet<DbType> _stringTypes = new()
         {
             DbType.Guid,
@@ -199,15 +206,7 @@ namespace Birko.Data.SQL
                         }
                         else
                         {
-                            var view = LoadView(exprType);
-                            if (view != null)
-                            {
-                                var field = view.GetTableFields().FirstOrDefault(x => x.Property.Name == memberExpression.Member.Name);
-                                if (field != null)
-                                {
-                                    name = field.GetSelectName(withTableName);
-                                }
-                            }
+                            name = ResolveFieldSelectName?.Invoke(exprType, memberExpression.Member.Name, withTableName) ?? string.Empty;
                         }
                     }
                     if (string.IsNullOrEmpty(name))
@@ -536,16 +535,7 @@ namespace Birko.Data.SQL
                             }
                             else
                             {
-                                var view = LoadView(exprType);
-                                if (view != null)
-                                {
-                                    var field = view.GetTableFields().FirstOrDefault(x => x.Property.Name == memberExpression.Member.Name);
-                                    if (field != null)
-                                    {
-                                        name = field.GetSelectName(true);
-                                    }
-                                }
-
+                                name = ResolveFieldSelectName?.Invoke(exprType, memberExpression.Member.Name, true) ?? string.Empty;
                             }
                         }
                         if (string.IsNullOrEmpty(name))
