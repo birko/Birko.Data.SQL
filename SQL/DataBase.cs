@@ -476,6 +476,31 @@ namespace Birko.Data.SQL
                     condition.Name = inner.Name;
                     return new[] { condition };
                 }
+                // Bare boolean member access: s.IsActive → "IsActive" = 1
+                // The C# expression tree represents `s.IsActive` as a MemberExpression
+                // without a parent comparison. Convert to an explicit `Prop = true` condition.
+                if (expr is MemberExpression bareBoolMember
+                    && bareBoolMember.Type == typeof(bool)
+                    && exprType != null
+                    && bareBoolMember.Member.ReflectedType?.IsAssignableFrom(exprType) == true
+                    && (bareBoolMember.Expression?.NodeType == ExpressionType.Parameter
+                        || (bareBoolMember.Expression is UnaryExpression bareBoolConvert
+                            && bareBoolConvert.NodeType == ExpressionType.Convert
+                            && bareBoolConvert.Operand.NodeType == ExpressionType.Parameter)))
+                {
+                    var condition = parent ?? new Conditions.Condition(null, null);
+                    var table = LoadTable(exprType);
+                    if (table != null)
+                    {
+                        var field = table.GetFieldByPropertyName(bareBoolMember.Member.Name);
+                        if (field != null) condition.Name = field.GetSelectName(true);
+                    }
+                    condition.Name ??= ResolveFieldSelectName?.Invoke(exprType, bareBoolMember.Member.Name, true) ?? bareBoolMember.Member.Name;
+                    condition.Type = ConditionType.Equal;
+                    condition.Values = new object[] { true };
+                    return new[] { condition };
+                }
+
                 if (parent != null)
                 {
                     if (expr is ConstantExpression || expr is MethodCallExpression)
