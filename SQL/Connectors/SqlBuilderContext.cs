@@ -29,7 +29,7 @@ namespace Birko.Data.SQL.Connectors
             }
 
             var count = command.Parameters?.Count ?? 0;
-            var sanitizedName = fieldName.Replace(".", string.Empty);
+            var sanitizedName = System.Text.RegularExpressions.Regex.Replace(fieldName, @"[^a-zA-Z0-9_]", string.Empty);
             return $"@WHERE{sanitizedName}{index}_{count}";
         }
 

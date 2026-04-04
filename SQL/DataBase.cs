@@ -188,6 +188,24 @@ namespace Birko.Data.SQL
                 }
                 else if (expr is MemberExpression memberExpression)
                 {
+                    // Handle DateTime property accessors like x.OpenedAt.Date → DATE(column)
+                    if (memberExpression.Member.Name == "Date"
+                        && memberExpression.Member.DeclaringType == typeof(DateTime)
+                        && memberExpression.Expression is MemberExpression innerDateMember)
+                    {
+                        var columnExpr = ParseExpression(innerDateMember, parameters, withTableName, exprType);
+                        if (!string.IsNullOrEmpty(columnExpr) && !columnExpr.StartsWith("@"))
+                        {
+                            return $"DATE({columnExpr})";
+                        }
+                        // If inner resolved to a parameter, evaluate the whole .Date as constant
+                        var key = "@Constat" + parameters.Count;
+                        var f = Expression.Lambda(memberExpression).Compile();
+                        var value = f.DynamicInvoke();
+                        parameters.Add(key, value!);
+                        return key;
+                    }
+
                     string name = string.Empty;
                     if (
                         exprType != null
@@ -537,6 +555,27 @@ namespace Birko.Data.SQL
                             ParseConditionExpression(hasValueInner, inner, exprType);
                             condition.Name = inner.Name;
                             return new[] { condition };
+                        }
+
+                        // Handle DateTime.Date property: x.OpenedAt.Date → DATE(column)
+                        if (memberExpression.Member.Name == "Date"
+                            && memberExpression.Member.DeclaringType == typeof(DateTime)
+                            && memberExpression.Expression is MemberExpression innerDateMember)
+                        {
+                            if (ContainsParameter(innerDateMember))
+                            {
+                                var inner = new Condition(null, null);
+                                ParseConditionExpression(innerDateMember, inner, exprType);
+                                if (!string.IsNullOrEmpty(inner.Name))
+                                {
+                                    parent.Name = $"DATE({inner.Name})";
+                                    return new[] { parent };
+                                }
+                            }
+                            // Right-hand side: evaluate as constant
+                            var dateValue = EvaluateExpression(memberExpression);
+                            parent.Values = new[] { dateValue };
+                            return Array.Empty<Condition>();
                         }
 
                         string name = string.Empty;
