@@ -144,7 +144,16 @@ namespace Birko.Data.SQL.Connectors
                 {
                     InitException(ex, commandText);
                 }
-                await using var reader = await command.ExecuteReaderAsync();
+                DbDataReader reader;
+                try
+                {
+                    reader = await command.ExecuteReaderAsync();
+                }
+                catch (Exception ex) when (ex.Message.Contains("no such table", StringComparison.OrdinalIgnoreCase))
+                {
+                    yield break;
+                }
+                await using var _ = reader;
                 if (!(reader?.HasRows ?? false))
                 {
                     yield break;

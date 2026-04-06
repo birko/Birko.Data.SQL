@@ -121,7 +121,10 @@ namespace Birko.Data.SQL.Connectors
                     OnExecute?.Invoke(command.CommandText);
                 }
                 catch (Exception ex) { InitException(ex, commandText); }
-                using var reader = command.ExecuteReader();
+                DbDataReader reader;
+                try { reader = command.ExecuteReader(); }
+                catch (Exception ex) when (ex.Message.Contains("no such table", StringComparison.OrdinalIgnoreCase)) { yield break; }
+                using var _r = reader;
                 if (!(reader?.HasRows ?? false)) yield break;
                 bool isNext = false;
                 try { isNext = reader.Read(); }
@@ -249,15 +252,18 @@ namespace Birko.Data.SQL.Connectors
                 {
                     InitException(ex, commandText);
                 }
-                using var reader = command.ExecuteReader();
-                if (!(reader?.HasRows ?? false))
+                DbDataReader reader2;
+                try { reader2 = command.ExecuteReader(); }
+                catch (Exception ex) when (ex.Message.Contains("no such table", StringComparison.OrdinalIgnoreCase)) { yield break; }
+                using var _r2 = reader2;
+                if (!(reader2?.HasRows ?? false))
                 {
                     yield break;
                 }
                 bool isNext = false;
                 try
                 {
-                    isNext = reader.Read();
+                    isNext = reader2.Read();
                 }
                 catch (Exception ex)
                 {
@@ -269,7 +275,7 @@ namespace Birko.Data.SQL.Connectors
                     IEnumerable<object>? row = null;
                     try
                     {
-                        row = transformFunction.Invoke(reader);
+                        row = transformFunction.Invoke(reader2);
                     }
                     catch (Exception ex)
                     {
@@ -282,7 +288,7 @@ namespace Birko.Data.SQL.Connectors
                     yield return row;
                     try
                     {
-                        isNext = reader.Read();
+                        isNext = reader2.Read();
                     }
                     catch (Exception ex)
                     {
