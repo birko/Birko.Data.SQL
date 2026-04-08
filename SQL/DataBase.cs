@@ -775,8 +775,13 @@ namespace Birko.Data.SQL
                 var cacheKey = expr.ToString();
                 var func = _expressionCache.GetOrAdd(cacheKey, _ =>
                 {
-                    var lambda = Expression.Lambda(expr);
-                    return (Func<object>)lambda.Compile();
+                    // Box value types (Guid, int, bool, enum, DateTime) so the compiled
+                    // delegate is always Func<object>, not Func<T>.
+                    var body = expr.Type.IsValueType
+                        ? Expression.Convert(expr, typeof(object))
+                        : expr;
+                    var lambda = Expression.Lambda<Func<object>>(body);
+                    return lambda.Compile();
                 });
                 return func();
             }
