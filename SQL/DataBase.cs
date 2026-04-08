@@ -561,7 +561,30 @@ namespace Birko.Data.SQL
                     }
                     else if (expr is MemberExpression memberExpression)
                     {
-                        // Bare HasValue access: x.NullableProp.HasValue → Prop IS NOT NULL
+                        // Non-parameter member access (closure variable, e.g. configId.Value,
+                        // filter.Status, local variable) — evaluate as a constant value.
+                        // Must be checked BEFORE column-resolution logic to avoid treating
+                        // closure fields as DB columns.
+                        if (!ContainsParameter(memberExpression))
+                        {
+                            // Special case: HasValue on closure nullable → evaluate as bool constant
+                            if (memberExpression.Member.Name == "HasValue"
+                                && memberExpression.Member.ReflectedType != null
+                                && Nullable.GetUnderlyingType(memberExpression.Member.ReflectedType) != null)
+                            {
+                                var boolVal = EvaluateExpression(memberExpression);
+                                parent.Values = new[] { boolVal };
+                                return new[] { parent };
+                            }
+
+                            var value = EvaluateExpression(memberExpression);
+                            parent.Values = (value != null && !(value is string) && (value is IEnumerable enumerable))
+                                ? enumerable
+                                : new[] { value };
+                            return new[] { parent };
+                        }
+
+                        // Bare HasValue access on parameter: x.NullableProp.HasValue → Prop IS NOT NULL
                         if (memberExpression.Member.Name == "HasValue"
                             && memberExpression.Expression is MemberExpression hasValueInner
                             && memberExpression.Member.ReflectedType != null
