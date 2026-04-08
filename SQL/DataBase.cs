@@ -697,6 +697,14 @@ namespace Birko.Data.SQL
                     return true;
                 }
             }
+            // An empty condition (no Name, no SubConditions, no Values) means the
+            // sub-expression returned Array.Empty (constant true) and the parent
+            // was never populated. Treat it as constant true.
+            if (condition.Values == null)
+            {
+                value = true;
+                return true;
+            }
             return false;
         }
 
