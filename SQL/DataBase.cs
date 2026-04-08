@@ -674,7 +674,7 @@ namespace Birko.Data.SQL
                 var list = vals.ToList();
                 if (list.Count == 1 && list[0] is bool b)
                 {
-                    value = b;
+                    value = condition.IsNot ? !b : b;
                     return true;
                 }
             }
