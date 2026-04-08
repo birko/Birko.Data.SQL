@@ -422,6 +422,25 @@ namespace Birko.Data.SQL
                     }
                     else
                     {
+                        // If neither side references a lambda parameter, the whole comparison
+                        // is a constant expression (e.g. `status == null`, `hasConfig == true`).
+                        // Evaluate it at parse time and return a constant bool condition.
+                        if (!ContainsParameter(binaryExpression.Left) && !ContainsParameter(binaryExpression.Right))
+                        {
+                            try
+                            {
+                                var constVal = EvaluateExpression(binaryExpression);
+                                if (constVal is bool boolVal)
+                                {
+                                    if (boolVal)
+                                        return Array.Empty<Conditions.Condition>();
+                                    else
+                                        return new[] { MakeFalseCondition(parent) };
+                                }
+                            }
+                            catch { /* fall through to normal handling */ }
+                        }
+
                         var basecondition = new Conditions.Condition(null, null)
                         {
                             IsOr = isOR,
