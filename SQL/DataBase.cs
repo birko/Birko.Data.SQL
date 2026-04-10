@@ -869,37 +869,14 @@ namespace Birko.Data.SQL
         private static IEnumerable<object>? InvokeExpression(Expression expr)
         {
             object? value = EvaluateExpression(expr);
-            if (value == null)
-            {
-                return null;
-            }
+            if (value == null) return null;
 
-            List<object> vals = new List<object>();
-            var valueType = value.GetType();
-            if (valueType.IsPrimitive || valueType == typeof(string) || valueType == typeof(Guid))
-            {
-                vals.Add(value);
-            }
-            else if (valueType.IsArray)
-            {
-                foreach (var item in (Array)value)
-                {
-                    vals.Add(item);
-                }
-            }
-            else
-            {
-                var fields = valueType.GetFields();
-                if (fields.Any())
-                {
-                    foreach (var field in fields)
-                    {
-                        vals.Add(field.GetValue(value)!);
-                    }
-                }
-            }
+            if (value is string)
+                return new object[] { value };
+            if (value is IEnumerable enumerable)
+                return enumerable.Cast<object>().Where(x => x != null);
 
-            return vals?.Where(x => x != null);
+            return new object[] { value };
         }
     }
 }
