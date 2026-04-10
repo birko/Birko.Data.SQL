@@ -172,9 +172,8 @@ namespace Birko.Data.SQL
                     }
                     else
                     {
-                        var key = "@Constat" + parameters.Count;
-                        var f = Expression.Lambda(callExpression).Compile();
-                        var value = f.DynamicInvoke();
+                        var key = "@Const" + parameters.Count;
+                        var value = EvaluateExpression(callExpression);
                         parameters.Add(key, value!);
                         return key;
                     }
@@ -199,9 +198,8 @@ namespace Birko.Data.SQL
                             return $"DATE({columnExpr})";
                         }
                         // If inner resolved to a parameter, evaluate the whole .Date as constant
-                        var key = "@Constat" + parameters.Count;
-                        var f = Expression.Lambda(memberExpression).Compile();
-                        var value = f.DynamicInvoke();
+                        var key = "@Const" + parameters.Count;
+                        var value = EvaluateExpression(memberExpression);
                         parameters.Add(key, value!);
                         return key;
                     }
@@ -233,7 +231,7 @@ namespace Birko.Data.SQL
                         {
                             Type type = constantExpression.Value!.GetType();
                             var value = type.InvokeMember(memberExpression.Member.Name, BindingFlags.GetField, null, constantExpression.Value, null);
-                            var key = "@Constat" + parameters.Count;
+                            var key = "@Const" + parameters.Count;
                             parameters.Add(key, value!);
                             return key;
                         }
@@ -243,9 +241,8 @@ namespace Birko.Data.SQL
                         }
                         else
                         {
-                            var key = "@Constat" + parameters.Count;
-                            var f = Expression.Lambda(memberExpression).Compile();
-                            var value = f.DynamicInvoke();
+                            var key = "@Const" + parameters.Count;
+                            var value = EvaluateExpression(memberExpression);
                             parameters.Add(key, value!);
                             return key;
                         }
@@ -257,7 +254,7 @@ namespace Birko.Data.SQL
                 }
                 else if (expr is ConstantExpression constantExpression)
                 {
-                    var key = "@Constat" + parameters.Count;
+                    var key = "@Const" + parameters.Count;
                     parameters.Add(key, constantExpression.Value!);
                     return key;
                 }
@@ -411,7 +408,10 @@ namespace Birko.Data.SQL
                             // Transfer the OR/AND flag to the parent so the SQL generator
                             // knows to join subconditions with OR instead of AND.
                             parent.IsOr = isOR;
-                            parent.SubConditions = (parent.SubConditions ?? []).Union(new[] { left, right });
+                            var subs = parent.SubConditions as List<Condition> ?? new List<Condition>(parent.SubConditions ?? []);
+                            subs.Add(left);
+                            subs.Add(right);
+                            parent.SubConditions = subs;
                             return new[] { parent };
                         }
                         else
@@ -451,7 +451,9 @@ namespace Birko.Data.SQL
                         var right = ParseConditionExpression(binaryExpression.Right, basecondition, exprType);
                         if (parent != null)
                         {
-                            parent.SubConditions = (parent.SubConditions ?? []).Union(new[] { basecondition }).AsEnumerable();
+                            var subs = parent.SubConditions as List<Condition> ?? new List<Condition>(parent.SubConditions ?? []);
+                            subs.Add(basecondition);
+                            parent.SubConditions = subs;
                             return new[] { parent };
                         }
                         else
