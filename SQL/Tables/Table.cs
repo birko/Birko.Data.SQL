@@ -13,6 +13,11 @@ namespace Birko.Data.SQL.Tables
         public Type Type { get; set; } = null!;
         public Dictionary<string, IndexDefinition>? Indexes { get; set; }
 
+        /// <summary>
+        /// Reverse lookup: property name → field. Built lazily on first GetFieldByPropertyName call.
+        /// </summary>
+        private Dictionary<string, Fields.AbstractField>? _propertyNameIndex;
+
         public IDictionary<int, string> GetSelectFields(bool withName  = false, bool notAggregate = false)
         {
             Dictionary<int, string> fields = new Dictionary<int, string>();
@@ -53,14 +58,19 @@ namespace Birko.Data.SQL.Tables
 
         internal Fields.AbstractField? GetField(string name)
         {
-            return (Fields != null && Fields.Any() && Fields.ContainsKey(name)) ? Fields[name] : null;
+            if (Fields == null) return null;
+            return Fields.TryGetValue(name, out var field) ? field : null;
         }
 
         internal Fields.AbstractField? GetFieldByPropertyName(string name)
         {
-            return (Fields != null && Fields.Any() && Fields.Any(x=>x.Value.Property != null && x.Value.Property.Name == name))
-                ? Fields.FirstOrDefault(x => x.Value.Property != null && x.Value.Property.Name == name).Value
-                : null;
+            if (Fields == null || Fields.Count == 0) return null;
+
+            _propertyNameIndex ??= Fields.Values
+                .Where(f => f.Property != null)
+                .ToDictionary(f => f.Property.Name, f => f);
+
+            return _propertyNameIndex.TryGetValue(name, out var field) ? field : null;
         }
     }
 }
