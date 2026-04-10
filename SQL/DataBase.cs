@@ -211,19 +211,7 @@ namespace Birko.Data.SQL
                         && (memberExpression.Expression?.NodeType == ExpressionType.Parameter || memberExpression.Expression?.NodeType == ExpressionType.TypeAs)
                     )
                     {
-                        var table = LoadTable(exprType);
-                        if (table != null)
-                        {
-                            var field = table.GetFieldByPropertyName(memberExpression.Member.Name);
-                            if (field != null)
-                            {
-                                name = field.GetSelectName(withTableName);
-                            }
-                        }
-                        else
-                        {
-                            name = ResolveFieldSelectName?.Invoke(exprType, memberExpression.Member.Name, withTableName) ?? string.Empty;
-                        }
+                        name = ResolveColumnName(exprType, memberExpression.Member.Name, withTableName) ?? string.Empty;
                     }
                     if (string.IsNullOrEmpty(name))
                     {
@@ -507,13 +495,7 @@ namespace Birko.Data.SQL
                             && bareBoolConvert.Operand.NodeType == ExpressionType.Parameter)))
                 {
                     var condition = parent ?? new Conditions.Condition(null, null);
-                    var table = LoadTable(exprType);
-                    if (table != null)
-                    {
-                        var field = table.GetFieldByPropertyName(bareBoolMember.Member.Name);
-                        if (field != null) condition.Name = field.GetSelectName(true);
-                    }
-                    condition.Name ??= ResolveFieldSelectName?.Invoke(exprType, bareBoolMember.Member.Name, true) ?? bareBoolMember.Member.Name;
+                    condition.Name = ResolveColumnName(exprType, bareBoolMember.Member.Name, true) ?? bareBoolMember.Member.Name;
                     condition.Type = ConditionType.Equal;
                     condition.Values = new object[] { true };
                     return new[] { condition };
@@ -617,19 +599,7 @@ namespace Birko.Data.SQL
                             && isParameterAccess
                         )
                         {
-                            var table = LoadTable(exprType);
-                            if (table != null)
-                            {
-                                var field = table.GetFieldByPropertyName(memberExpression.Member.Name);
-                                if (field != null)
-                                {
-                                    name = field.GetSelectName(true);
-                                }
-                            }
-                            else
-                            {
-                                name = ResolveFieldSelectName?.Invoke(exprType, memberExpression.Member.Name, true) ?? string.Empty;
-                            }
+                            name = ResolveColumnName(exprType, memberExpression.Member.Name, true) ?? string.Empty;
                         }
                         if (string.IsNullOrEmpty(name))
                         {
@@ -668,6 +638,22 @@ namespace Birko.Data.SQL
                 }
             }
             return Array.Empty<Condition>();
+        }
+
+        /// <summary>
+        /// Resolves a C# property name to its SQL column/field select name using LoadTable + GetFieldByPropertyName,
+        /// with fallback to ResolveFieldSelectName delegate (for views).
+        /// Returns null if the property cannot be resolved.
+        /// </summary>
+        private static string? ResolveColumnName(Type exprType, string propertyName, bool withTableName)
+        {
+            var table = LoadTable(exprType);
+            if (table != null)
+            {
+                var field = table.GetFieldByPropertyName(propertyName);
+                if (field != null) return field.GetSelectName(withTableName);
+            }
+            return ResolveFieldSelectName?.Invoke(exprType, propertyName, withTableName);
         }
 
         /// <summary>
