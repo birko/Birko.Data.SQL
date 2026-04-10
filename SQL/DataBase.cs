@@ -436,25 +436,19 @@ namespace Birko.Data.SQL
                 else if (expr is MethodCallExpression methodExpression)
                 {
                     var condition = parent ?? new Conditions.Condition(null, null);
-                    if (methodExpression.Method.Name == "StartsWith")
+                    switch (methodExpression.Method.Name)
                     {
-                        condition.Type = ConditionType.StartsWith;
-                    }
-                    if (methodExpression.Method.Name == "EndsWith")
-                    {
-                        condition.Type = ConditionType.EndsWith;
-                    }
-                    if (methodExpression.Method.Name == "Contains")
-                    {
-                        //condition.Name = 
-                        if (methodExpression.Method.DeclaringType?.Name == "String")
-                        {
-                            condition.Type = ConditionType.Like;
-                        }
-                        else
-                        {
-                            condition.Type = ConditionType.In;
-                        }
+                        case "StartsWith":
+                            condition.Type = ConditionType.StartsWith;
+                            break;
+                        case "EndsWith":
+                            condition.Type = ConditionType.EndsWith;
+                            break;
+                        case "Contains":
+                            condition.Type = methodExpression.Method.DeclaringType?.Name == "String"
+                                ? ConditionType.Like
+                                : ConditionType.In;
+                            break;
                     }
                     if (methodExpression.Arguments != null && methodExpression.Arguments.Any())
                     {
