@@ -11,6 +11,7 @@ namespace Birko.Data.SQL.Stores
     /// <summary>
     /// Bulk database store that provides optimized bulk operations.
     /// Extends <see cref="DataBaseStore{DB, T}"/> with bulk CRUD capabilities.
+    /// Uses Template Method pattern — concrete stores override *Core methods.
     /// </summary>
     /// <typeparam name="DB">The type of database connector, must inherit from <see cref="AbstractConnector"/>.</typeparam>
     /// <typeparam name="T">The type of entity, must inherit from <see cref="Models.AbstractModel"/>.</typeparam>
@@ -29,7 +30,16 @@ namespace Birko.Data.SQL.Stores
         #region Bulk Read Operations
 
         /// <inheritdoc />
-        public virtual IEnumerable<T> Read(Expression<Func<T, bool>>? filter = null, OrderBy<T>? orderBy = null, int? limit = null, int? offset = null)
+        public IEnumerable<T> Read(Expression<Func<T, bool>>? filter = null, OrderBy<T>? orderBy = null, int? limit = null, int? offset = null)
+        {
+            EnsureInitialized();
+            return ReadCore(filter, orderBy, limit, offset);
+        }
+
+        /// <summary>
+        /// Core bulk read implementation. Override in concrete stores for provider-specific behavior.
+        /// </summary>
+        protected virtual IEnumerable<T> ReadCore(Expression<Func<T, bool>>? filter = null, OrderBy<T>? orderBy = null, int? limit = null, int? offset = null)
         {
             return Connector?.Select(typeof(T), filter as LambdaExpression, orderBy?.ToDictionary(), limit, offset)?.OfType<T>() ?? Enumerable.Empty<T>();
         }
@@ -45,7 +55,16 @@ namespace Birko.Data.SQL.Stores
         #region Bulk Write Operations
 
         /// <inheritdoc />
-        public virtual void Create(IEnumerable<T> data, StoreDataDelegate<T>? storeDelegate = null)
+        public void Create(IEnumerable<T> data, StoreDataDelegate<T>? storeDelegate = null)
+        {
+            EnsureInitialized();
+            CreateCore(data, storeDelegate);
+        }
+
+        /// <summary>
+        /// Core bulk create implementation. Override in concrete stores for provider-specific behavior.
+        /// </summary>
+        protected virtual void CreateCore(IEnumerable<T> data, StoreDataDelegate<T>? storeDelegate = null)
         {
             foreach (var item in data)
             {
@@ -54,7 +73,16 @@ namespace Birko.Data.SQL.Stores
         }
 
         /// <inheritdoc />
-        public virtual void Update(IEnumerable<T> data, StoreDataDelegate<T>? storeDelegate = null)
+        public void Update(IEnumerable<T> data, StoreDataDelegate<T>? storeDelegate = null)
+        {
+            EnsureInitialized();
+            UpdateCore(data, storeDelegate);
+        }
+
+        /// <summary>
+        /// Core bulk update implementation. Override in concrete stores for provider-specific behavior.
+        /// </summary>
+        protected virtual void UpdateCore(IEnumerable<T> data, StoreDataDelegate<T>? storeDelegate = null)
         {
             foreach (var item in data)
             {
@@ -76,6 +104,7 @@ namespace Birko.Data.SQL.Stores
         /// <inheritdoc />
         public virtual void Update(Expression<Func<T, bool>> filter, PropertyUpdate<T> updates)
         {
+            EnsureInitialized();
             if (Connector == null || updates.Assignments.Count == 0) return;
 
             var table = SQL.DataBase.LoadTable(typeof(T));
@@ -94,7 +123,16 @@ namespace Birko.Data.SQL.Stores
         }
 
         /// <inheritdoc />
-        public virtual void Delete(IEnumerable<T> data)
+        public void Delete(IEnumerable<T> data)
+        {
+            EnsureInitialized();
+            DeleteCore(data);
+        }
+
+        /// <summary>
+        /// Core bulk delete implementation. Override in concrete stores for provider-specific behavior.
+        /// </summary>
+        protected virtual void DeleteCore(IEnumerable<T> data)
         {
             foreach (var item in data)
             {
@@ -105,6 +143,7 @@ namespace Birko.Data.SQL.Stores
         /// <inheritdoc />
         public virtual void Delete(Expression<Func<T, bool>> filter)
         {
+            EnsureInitialized();
             if (Connector == null) return;
             Connector.Delete(typeof(T), filter as LambdaExpression);
         }

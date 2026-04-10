@@ -100,8 +100,7 @@ namespace Birko.Data.SQL.Stores
             }
         }
 
-        /// <inheritdoc />
-        public override async Task InitAsync(CancellationToken ct = default)
+        protected override async Task InitCoreAsync(CancellationToken ct = default)
         {
             if (Connector == null) return;
             if (AsyncConnector != null)
@@ -124,8 +123,7 @@ namespace Birko.Data.SQL.Stores
 
         #region Core CRUD Operations - Single Item
 
-        /// <inheritdoc />
-        public override async Task<Guid> CreateAsync(T data, StoreDataDelegate<T>? processDelegate = null, CancellationToken ct = default)
+        protected override async Task<Guid> CreateCoreAsync(T data, StoreDataDelegate<T>? processDelegate = null, CancellationToken ct = default)
         {
             if (Connector == null || data == null) return Guid.Empty;
 
@@ -139,8 +137,7 @@ namespace Birko.Data.SQL.Stores
             return data.Guid!.Value;
         }
 
-        /// <inheritdoc />
-        public override async Task<T?> ReadAsync(Expression<Func<T, bool>>? filter = null, CancellationToken ct = default)
+        protected override async Task<T?> ReadCoreAsync(Expression<Func<T, bool>>? filter = null, CancellationToken ct = default)
         {
             if (Connector == null) return default;
 
@@ -166,8 +163,7 @@ namespace Birko.Data.SQL.Stores
             return default;
         }
 
-        /// <inheritdoc />
-        public override async Task UpdateAsync(T data, StoreDataDelegate<T>? processDelegate = null, CancellationToken ct = default)
+        protected override async Task UpdateCoreAsync(T data, StoreDataDelegate<T>? processDelegate = null, CancellationToken ct = default)
         {
             if (Connector == null || data == null) return;
 
@@ -186,8 +182,7 @@ namespace Birko.Data.SQL.Stores
                 await Task.Run(() => Connector!.Update(data, conditions), ct);
         }
 
-        /// <inheritdoc />
-        public override async Task DeleteAsync(T data, CancellationToken ct = default)
+        protected override async Task DeleteCoreAsync(T data, CancellationToken ct = default)
         {
             if (Connector == null || data == null) return;
 
@@ -207,8 +202,7 @@ namespace Birko.Data.SQL.Stores
 
         #region Query and Count Operations
 
-        /// <inheritdoc />
-        public override async Task<long> CountAsync(Expression<Func<T, bool>>? filter = null, CancellationToken ct = default)
+        protected override async Task<long> CountCoreAsync(Expression<Func<T, bool>>? filter = null, CancellationToken ct = default)
         {
             if (Connector == null) return 0;
 

@@ -13,6 +13,7 @@ namespace Birko.Data.SQL.Stores
     /// <summary>
     /// Async bulk database store that provides optimized bulk operations.
     /// Extends <see cref="AsyncDataBaseStore{DB, T}"/> with async bulk CRUD capabilities.
+    /// Uses Template Method pattern — concrete stores override *CoreAsync methods.
     /// </summary>
     /// <typeparam name="DB">The type of database connector, must inherit from <see cref="AbstractConnector"/>.</typeparam>
     /// <typeparam name="T">The type of entity, must inherit from <see cref="Models.AbstractModel"/>.</typeparam>
@@ -31,7 +32,21 @@ namespace Birko.Data.SQL.Stores
         #region Bulk Read Operations
 
         /// <inheritdoc />
-        public virtual async Task<IEnumerable<T>> ReadAsync(
+        public async Task<IEnumerable<T>> ReadAsync(
+            Expression<Func<T, bool>>? filter = null,
+            OrderBy<T>? orderBy = null,
+            int? limit = null,
+            int? offset = null,
+            CancellationToken ct = default)
+        {
+            await EnsureInitializedAsync(ct).ConfigureAwait(false);
+            return await ReadCoreAsync(filter, orderBy, limit, offset, ct);
+        }
+
+        /// <summary>
+        /// Core bulk read implementation. Override in concrete stores for provider-specific behavior.
+        /// </summary>
+        protected virtual async Task<IEnumerable<T>> ReadCoreAsync(
             Expression<Func<T, bool>>? filter = null,
             OrderBy<T>? orderBy = null,
             int? limit = null,
@@ -67,7 +82,19 @@ namespace Birko.Data.SQL.Stores
         #region Bulk Write Operations
 
         /// <inheritdoc />
-        public virtual async Task CreateAsync(
+        public async Task CreateAsync(
+            IEnumerable<T> data,
+            StoreDataDelegate<T>? storeDelegate = null,
+            CancellationToken ct = default)
+        {
+            await EnsureInitializedAsync(ct).ConfigureAwait(false);
+            await CreateCoreAsync(data, storeDelegate, ct);
+        }
+
+        /// <summary>
+        /// Core bulk create implementation. Override in concrete stores for provider-specific behavior.
+        /// </summary>
+        protected virtual async Task CreateCoreAsync(
             IEnumerable<T> data,
             StoreDataDelegate<T>? storeDelegate = null,
             CancellationToken ct = default)
@@ -79,7 +106,19 @@ namespace Birko.Data.SQL.Stores
         }
 
         /// <inheritdoc />
-        public virtual async Task UpdateAsync(
+        public async Task UpdateAsync(
+            IEnumerable<T> data,
+            StoreDataDelegate<T>? storeDelegate = null,
+            CancellationToken ct = default)
+        {
+            await EnsureInitializedAsync(ct).ConfigureAwait(false);
+            await UpdateCoreAsync(data, storeDelegate, ct);
+        }
+
+        /// <summary>
+        /// Core bulk update implementation. Override in concrete stores for provider-specific behavior.
+        /// </summary>
+        protected virtual async Task UpdateCoreAsync(
             IEnumerable<T> data,
             StoreDataDelegate<T>? storeDelegate = null,
             CancellationToken ct = default)
@@ -110,6 +149,7 @@ namespace Birko.Data.SQL.Stores
             PropertyUpdate<T> updates,
             CancellationToken ct = default)
         {
+            await EnsureInitializedAsync(ct).ConfigureAwait(false);
             if (Connector == null || updates.Assignments.Count == 0) return;
 
             var table = SQL.DataBase.LoadTable(typeof(T));
@@ -131,7 +171,18 @@ namespace Birko.Data.SQL.Stores
         }
 
         /// <inheritdoc />
-        public virtual async Task DeleteAsync(
+        public async Task DeleteAsync(
+            IEnumerable<T> data,
+            CancellationToken ct = default)
+        {
+            await EnsureInitializedAsync(ct).ConfigureAwait(false);
+            await DeleteCoreAsync(data, ct);
+        }
+
+        /// <summary>
+        /// Core bulk delete implementation. Override in concrete stores for provider-specific behavior.
+        /// </summary>
+        protected virtual async Task DeleteCoreAsync(
             IEnumerable<T> data,
             CancellationToken ct = default)
         {
@@ -146,6 +197,7 @@ namespace Birko.Data.SQL.Stores
             Expression<Func<T, bool>> filter,
             CancellationToken ct = default)
         {
+            await EnsureInitializedAsync(ct).ConfigureAwait(false);
             if (Connector == null) return;
             if (AsyncConnector != null)
                 await AsyncConnector.DeleteAsync(typeof(T), filter as LambdaExpression, ct);

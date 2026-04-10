@@ -92,8 +92,7 @@ namespace Birko.Data.SQL.Stores
 
         #region Initialization and Lifecycle
 
-        /// <inheritdoc />
-        public override void Init()
+        protected override void InitCore()
         {
             Connector?.DoInit();
         }
@@ -108,8 +107,7 @@ namespace Birko.Data.SQL.Stores
 
         #region Core CRUD Operations - Single Item
 
-        /// <inheritdoc />
-        public override Guid Create(T data, StoreDataDelegate<T>? storeDelegate = null)
+        protected override Guid CreateCore(T data, StoreDataDelegate<T>? storeDelegate = null)
         {
             data.Guid ??= Guid.NewGuid();
             storeDelegate?.Invoke(data);
@@ -117,14 +115,12 @@ namespace Birko.Data.SQL.Stores
             return data.Guid!.Value;
         }
 
-        /// <inheritdoc />
-        public override T? Read(Expression<Func<T, bool>>? filter = null)
+        protected override T? ReadCore(Expression<Func<T, bool>>? filter = null)
         {
             return Connector?.Select(typeof(T), filter as LambdaExpression, null, 1, null)?.OfType<T>().FirstOrDefault();
         }
 
-        /// <inheritdoc />
-        public override void Update(T data, StoreDataDelegate<T>? storeDelegate = null)
+        protected override void UpdateCore(T data, StoreDataDelegate<T>? storeDelegate = null)
         {
             List<SQL.Conditions.Condition> conditions = new List<SQL.Conditions.Condition>();
 
@@ -137,8 +133,7 @@ namespace Birko.Data.SQL.Stores
             Connector.Update(data, conditions);
         }
 
-        /// <inheritdoc />
-        public override void Delete(T data)
+        protected override void DeleteCore(T data)
         {
             if (data == null) return;
 
@@ -154,8 +149,7 @@ namespace Birko.Data.SQL.Stores
 
         #region Query and Count Operations
 
-        /// <inheritdoc />
-        public override long Count(Expression<Func<T, bool>>? filter = null)
+        protected override long CountCore(Expression<Func<T, bool>>? filter = null)
         {
             return Connector?.SelectCount(typeof(T), filter) ?? 0;
         }
