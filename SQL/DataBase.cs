@@ -215,24 +215,17 @@ namespace Birko.Data.SQL
                     }
                     if (string.IsNullOrEmpty(name))
                     {
-                        if (memberExpression.Expression is ConstantExpression constantExpression)
-                        {
-                            Type type = constantExpression.Value!.GetType();
-                            var value = type.InvokeMember(memberExpression.Member.Name, BindingFlags.GetField, null, constantExpression.Value, null);
-                            var key = "@Const" + parameters.Count;
-                            parameters.Add(key, value!);
-                            return key;
-                        }
-                        else if (memberExpression.Expression != null)
-                        {
-                            return ParseExpression(memberExpression.Expression, parameters, withTableName); // not resending type here
-                        }
-                        else
+                        if (memberExpression.Expression is ConstantExpression
+                            || memberExpression.Expression == null)
                         {
                             var key = "@Const" + parameters.Count;
                             var value = EvaluateExpression(memberExpression);
                             parameters.Add(key, value!);
                             return key;
+                        }
+                        else
+                        {
+                            return ParseExpression(memberExpression.Expression, parameters, withTableName); // not resending type here
                         }
                     }
                     else
@@ -603,17 +596,12 @@ namespace Birko.Data.SQL
                         }
                         if (string.IsNullOrEmpty(name))
                         {
-                            if (memberExpression.Expression is ConstantExpression constantExpression)
+                            if ((memberExpression.Expression is ConstantExpression
+                                || (memberExpression.Expression != null && !ContainsParameter(memberExpression))))
                             {
-                                Type type = constantExpression.Value!.GetType();
-                                var value = type.InvokeMember(memberExpression.Member.Name, BindingFlags.GetField | BindingFlags.GetProperty | BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, constantExpression.Value, null);
-                                parent.Values = (!(value is string) && (value is IEnumerable)) ? (IEnumerable)value : new[] { value };
-                            }
-                            else if (memberExpression.Expression != null && !ContainsParameter(memberExpression))
-                            {
-                                // Nested member access on closure (e.g., closure.request.Login)
+                                // Closure field or nested member access — evaluate as constant
                                 var value = EvaluateExpression(memberExpression);
-                                parent.Values = (value != null && !(value is string) && (value is IEnumerable enumerable))
+                                parent.Values = (value != null && value is not string && value is IEnumerable enumerable)
                                     ? enumerable
                                     : new[] { value };
                             }
