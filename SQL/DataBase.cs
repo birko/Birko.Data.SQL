@@ -205,10 +205,15 @@ namespace Birko.Data.SQL
                     }
 
                     string name = string.Empty;
+                    var isParamAccess = memberExpression.Expression?.NodeType == ExpressionType.Parameter
+                        || memberExpression.Expression?.NodeType == ExpressionType.TypeAs
+                        || (memberExpression.Expression is UnaryExpression convExpr
+                            && convExpr.NodeType == ExpressionType.Convert
+                            && convExpr.Operand.NodeType == ExpressionType.Parameter);
                     if (
                         exprType != null
                         && memberExpression.Member.ReflectedType?.IsAssignableFrom(exprType) == true
-                        && (memberExpression.Expression?.NodeType == ExpressionType.Parameter || memberExpression.Expression?.NodeType == ExpressionType.TypeAs)
+                        && isParamAccess
                     )
                     {
                         name = ResolveColumnName(exprType, memberExpression.Member.Name, withTableName) ?? string.Empty;
