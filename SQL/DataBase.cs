@@ -298,22 +298,12 @@ namespace Birko.Data.SQL
                     }
                     if (unaryExpression.NodeType == ExpressionType.Not)
                     {
-                        // Not(MemberAccess(MemberAccess(param, Prop), HasValue)) → Prop IS NULL
-                        // C# compiler generates this for `x.NullableProp == null`
-                        if (unaryExpression.Operand is MemberExpression notMember
-                            && notMember.Member.Name == "HasValue"
-                            && notMember.Expression is MemberExpression innerMember
-                            && Nullable.GetUnderlyingType(notMember.Member.ReflectedType!) != null)
+                        // Not(HasValue) → IS NULL
+                        if (unaryExpression.Operand is MemberExpression notMember)
                         {
-                            var condition = parent ?? new Conditions.Condition(null, null);
-                            condition.Type = ConditionType.IsNull;
-                            // Resolve the property name from the inner member (the actual nullable property)
-                            var inner = new Conditions.Condition(null, null);
-                            ParseConditionExpression(innerMember, inner, exprType);
-                            condition.Name = inner.Name;
-                            return new[] { condition };
+                            var hasValueResult = TryParseHasValue(notMember, parent, exprType, isNegated: true);
+                            if (hasValueResult != null) return hasValueResult;
                         }
-                        // MemberAccess(MemberAccess(param, Prop), HasValue) without Not → Prop IS NOT NULL
                         // General Not: recurse and set IsNot on the result
                         var notCondition = parent ?? new Conditions.Condition(null, null);
                         notCondition.IsNot = !notCondition.IsNot; // toggle
@@ -499,21 +489,10 @@ namespace Birko.Data.SQL
                     return new[] { condition };
                 }
                 // Bare HasValue access at top level: x.NullableProp.HasValue → Prop IS NOT NULL
-                // Must be checked before the parent != null guard because the lambda body
-                // can be a bare HasValue expression with no parent.
-                if (expr is MemberExpression topMember
-                    && topMember.Member.Name == "HasValue"
-                    && topMember.Expression is MemberExpression topHasValueInner
-                    && topMember.Member.ReflectedType != null
-                    && Nullable.GetUnderlyingType(topMember.Member.ReflectedType) != null)
+                if (expr is MemberExpression topMember)
                 {
-                    var condition = parent ?? new Conditions.Condition(null, null);
-                    condition.Type = ConditionType.IsNull;
-                    condition.IsNot = !condition.IsNot; // HasValue without Not = IS NOT NULL
-                    var inner = new Conditions.Condition(null, null);
-                    ParseConditionExpression(topHasValueInner, inner, exprType);
-                    condition.Name = inner.Name;
-                    return new[] { condition };
+                    var hasValueResult = TryParseHasValue(topMember, parent, exprType, isNegated: false);
+                    if (hasValueResult != null) return hasValueResult;
                 }
                 // Bare boolean member access: s.IsActive → "IsActive" = 1
                 // The C# expression tree represents `s.IsActive` as a MemberExpression
@@ -587,19 +566,8 @@ namespace Birko.Data.SQL
                         }
 
                         // Bare HasValue access on parameter: x.NullableProp.HasValue → Prop IS NOT NULL
-                        if (memberExpression.Member.Name == "HasValue"
-                            && memberExpression.Expression is MemberExpression hasValueInner
-                            && memberExpression.Member.ReflectedType != null
-                            && Nullable.GetUnderlyingType(memberExpression.Member.ReflectedType) != null)
-                        {
-                            var condition = parent ?? new Conditions.Condition(null, null);
-                            condition.Type = ConditionType.IsNull;
-                            condition.IsNot = !condition.IsNot; // HasValue without Not = IS NOT NULL
-                            var inner = new Conditions.Condition(null, null);
-                            ParseConditionExpression(hasValueInner, inner, exprType);
-                            condition.Name = inner.Name;
-                            return new[] { condition };
-                        }
+                        var hasValueResult = TryParseHasValue(memberExpression, parent, exprType, isNegated: false);
+                        if (hasValueResult != null) return hasValueResult;
 
                         // Handle DateTime.Date property: x.OpenedAt.Date → DATE(column)
                         if (memberExpression.Member.Name == "Date"
@@ -700,6 +668,32 @@ namespace Birko.Data.SQL
                 }
             }
             return Array.Empty<Condition>();
+        }
+
+        /// <summary>
+        /// Tries to parse a HasValue member access on a nullable property into an IS NULL / IS NOT NULL condition.
+        /// Returns null if the expression is not a HasValue access.
+        /// </summary>
+        /// <param name="member">The member expression to check.</param>
+        /// <param name="parent">Parent condition to populate, or null to create a new one.</param>
+        /// <param name="exprType">The lambda parameter type for column resolution.</param>
+        /// <param name="isNegated">True when inside a Not() wrapper (HasValue negated → IS NULL), false for bare HasValue (→ IS NOT NULL).</param>
+        private static IEnumerable<Condition>? TryParseHasValue(MemberExpression member, Condition? parent, Type? exprType, bool isNegated)
+        {
+            if (member.Member.Name != "HasValue"
+                || member.Member.ReflectedType == null
+                || Nullable.GetUnderlyingType(member.Member.ReflectedType) == null
+                || member.Expression is not MemberExpression innerMember)
+                return null;
+
+            var condition = parent ?? new Condition(null, null);
+            condition.Type = ConditionType.IsNull;
+            if (!isNegated)
+                condition.IsNot = !condition.IsNot;
+            var inner = new Condition(null, null);
+            ParseConditionExpression(innerMember, inner, exprType);
+            condition.Name = inner.Name;
+            return new[] { condition };
         }
 
         /// <summary>
