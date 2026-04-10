@@ -847,6 +847,8 @@ namespace Birko.Data.SQL
         /// </summary>
         private static bool ContainsParameter(Expression expr)
         {
+            if (expr is LambdaExpression lambda)
+                return lambda.Parameters.Count > 0;
             if (expr is ParameterExpression)
                 return true;
             if (expr is MemberExpression me)
