@@ -43,8 +43,7 @@ namespace Birko.Data.SQL.Connectors.Strategies
             {
                 var formattedValue = context.FormatValue(first, condition.Type);
                 var paramName = context.GenerateParameterName(condition.Name!, 0, command);
-                var escapedValue = context.EscapeValue(formattedValue);
-                context.AddParameter(command, paramName, escapedValue);
+                context.AddParameter(command, paramName, formattedValue);
                 return paramName;
             }
             else

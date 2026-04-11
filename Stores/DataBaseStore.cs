@@ -94,6 +94,7 @@ namespace Birko.Data.SQL.Stores
 
         protected override void InitCore()
         {
+            Connector?.CreateTable(new[] { typeof(T) });
             Connector?.DoInit();
         }
 

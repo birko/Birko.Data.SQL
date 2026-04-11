@@ -16,7 +16,27 @@ namespace Birko.Data.SQL
     {
         private static readonly ConcurrentDictionary<Type, ConcurrentDictionary<string, AbstractConnector>> _connectors = new();
         private static readonly ConcurrentDictionary<Type, ConcurrentDictionary<string, AbstractAsyncConnector>> _asyncConnectors = new();
-        private static readonly ConcurrentDictionary<string, Func<object>> _expressionCache = new();
+        private static readonly ConcurrentDictionary<Type, Func<object>> _instanceFactories = new();
+
+        /// <summary>
+        /// Returns a compiled parameterless constructor delegate for <paramref name="type"/>,
+        /// cached per type. Avoids Activator.CreateInstance reflection on every row.
+        /// </summary>
+        internal static Func<object> GetOrCreateInstanceFactory(Type type)
+        {
+            return _instanceFactories.GetOrAdd(type, static t =>
+            {
+                var ctor = t.GetConstructor(Type.EmptyTypes)
+                    ?? throw new InvalidOperationException($"Type {t.FullName} has no parameterless constructor");
+                var newExpr = Expression.New(ctor);
+                var lambda = Expression.Lambda<Func<object>>(Expression.Convert(newExpr, typeof(object)));
+                return lambda.Compile();
+            });
+        }
+        // Keyed by Expression reference identity — avoids ToString() traversal and prevents memory leaks via weak refs
+        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Expression, Func<object>> _expressionCache = new();
+        // Memoizes ContainsParameter results by Expression reference to avoid repeated subtree walks
+        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Expression, System.Runtime.CompilerServices.StrongBox<bool>> _containsParamCache = new();
 
         /// <summary>
         /// Extension point for resolving field select names from non-table sources (e.g. views).
@@ -342,41 +362,52 @@ namespace Birko.Data.SQL
 
                     if (isAnd || isOR)
                     {
-                        var basecondition = new Conditions.Condition(null, null)
-                        {
-                            IsOr = isOR,
-                            Type = conditionType,
-                            IsNot = isNot,
-                        };
-                        var left = new Conditions.Condition(null, null);
-                        ParseConditionExpression(binaryExpression.Left, left, exprType);
-                        var right = new Conditions.Condition(null, null);
-                        ParseConditionExpression(binaryExpression.Right, right, exprType);
+                        // Fast-path: resolve literal/closure bools without allocating Condition objects.
+                        // Only falls back to full parsing when the expression references a lambda parameter.
+                        var leftBool = TryGetLiteralBool(binaryExpression.Left);
+                        var rightBool = TryGetLiteralBool(binaryExpression.Right);
 
-                        // Handle constant boolean operands in AND/OR:
-                        //   AND: true is identity (skip), false short-circuits (only false)
-                        //   OR:  true short-circuits (skip whole clause), false is identity (skip)
-                        bool leftIsConst = IsConstantBoolCondition(left, out bool leftVal);
-                        bool rightIsConst = IsConstantBoolCondition(right, out bool rightVal);
+                        if (leftBool.HasValue && rightBool.HasValue)
+                        {
+                            bool r = isAnd ? (leftBool.Value && rightBool.Value) : (leftBool.Value || rightBool.Value);
+                            return r ? Array.Empty<Conditions.Condition>() : new[] { MakeFalseCondition(parent) };
+                        }
+
+                        Conditions.Condition? leftCond = null, rightCond = null;
+                        bool leftIsConst = leftBool.HasValue, leftVal = leftBool ?? false;
+                        bool rightIsConst = rightBool.HasValue, rightVal = rightBool ?? false;
+
+                        if (!leftIsConst)
+                        {
+                            leftCond = new Conditions.Condition(null, null);
+                            ParseConditionExpression(binaryExpression.Left, leftCond, exprType);
+                            leftIsConst = IsConstantBoolCondition(leftCond, out leftVal);
+                        }
+                        if (!rightIsConst)
+                        {
+                            rightCond = new Conditions.Condition(null, null);
+                            ParseConditionExpression(binaryExpression.Right, rightCond, exprType);
+                            rightIsConst = IsConstantBoolCondition(rightCond, out rightVal);
+                        }
 
                         if (leftIsConst && rightIsConst)
                         {
-                            bool result = isAnd ? (leftVal && rightVal) : (leftVal || rightVal);
-                            return result ? Array.Empty<Conditions.Condition>() : new[] { MakeFalseCondition(parent) };
+                            bool r = isAnd ? (leftVal && rightVal) : (leftVal || rightVal);
+                            return r ? Array.Empty<Conditions.Condition>() : new[] { MakeFalseCondition(parent) };
                         }
                         if (leftIsConst)
                         {
-                            if (isAnd && leftVal) return ReturnSingleSubCondition(parent, right, isOR);
+                            if (isAnd && leftVal) return ReturnSingleSubCondition(parent, rightCond!, isOR);
                             if (isAnd && !leftVal) return new[] { MakeFalseCondition(parent) };
                             if (isOR && leftVal) return Array.Empty<Conditions.Condition>();
-                            if (isOR && !leftVal) return ReturnSingleSubCondition(parent, right, isOR);
+                            if (isOR && !leftVal) return ReturnSingleSubCondition(parent, rightCond!, isOR);
                         }
                         if (rightIsConst)
                         {
-                            if (isAnd && rightVal) return ReturnSingleSubCondition(parent, left, isOR);
+                            if (isAnd && rightVal) return ReturnSingleSubCondition(parent, leftCond!, isOR);
                             if (isAnd && !rightVal) return new[] { MakeFalseCondition(parent) };
                             if (isOR && rightVal) return Array.Empty<Conditions.Condition>();
-                            if (isOR && !rightVal) return ReturnSingleSubCondition(parent, left, isOR);
+                            if (isOR && !rightVal) return ReturnSingleSubCondition(parent, leftCond!, isOR);
                         }
 
                         if (parent != null)
@@ -385,15 +416,20 @@ namespace Birko.Data.SQL
                             // knows to join subconditions with OR instead of AND.
                             parent.IsOr = isOR;
                             var subs = parent.SubConditions as List<Condition> ?? new List<Condition>(parent.SubConditions ?? []);
-                            subs.Add(left);
-                            subs.Add(right);
+                            subs.Add(leftCond!);
+                            subs.Add(rightCond!);
                             parent.SubConditions = subs;
                             return new[] { parent };
                         }
                         else
                         {
-                            basecondition.SubConditions = new[] { left, right };
-                            return new[] { basecondition };
+                            return new[] { new Conditions.Condition(null, null)
+                            {
+                                IsOr = isOR,
+                                Type = conditionType,
+                                IsNot = isNot,
+                                SubConditions = new List<Condition> { leftCond!, rightCond! },
+                            }};
                         }
                     }
                     else
@@ -498,9 +534,10 @@ namespace Birko.Data.SQL
                     if (expr is ConstantExpression || expr is MethodCallExpression)
                     {
                         IEnumerable<object>? vals = InvokeExpression(expr);
-                        if (vals?.Any(x => x != null) ?? false)
+                        var materialized = vals?.Where(x => x != null).ToArray();
+                        if (materialized?.Length > 0)
                         {
-                            parent.Values = vals.Where(x => x != null);
+                            parent.Values = materialized;
                         }
                         else
                         {
@@ -533,8 +570,8 @@ namespace Birko.Data.SQL
                             }
 
                             var value = EvaluateExpression(memberExpression);
-                            parent.Values = (value != null && !(value is string) && (value is IEnumerable enumerable))
-                                ? enumerable
+                            parent.Values = (value != null && value is not string && value is IEnumerable enumerable)
+                                ? (enumerable as object[] ?? enumerable.Cast<object>().ToArray())
                                 : new[] { value };
                             return new[] { parent };
                         }
@@ -601,17 +638,18 @@ namespace Birko.Data.SQL
                                 // Closure field or nested member access — evaluate as constant
                                 var value = EvaluateExpression(memberExpression);
                                 parent.Values = (value != null && value is not string && value is IEnumerable enumerable)
-                                    ? enumerable
+                                    ? (enumerable as object[] ?? enumerable.Cast<object>().ToArray())
                                     : new[] { value };
                             }
                             else
                             {
                                 IEnumerable<object>? vals = InvokeExpression(expr);
-                                if (vals?.Any(x => x != null) ?? false)
+                                var materialized = vals?.Where(x => x != null).ToArray();
+                                if (materialized?.Length > 0)
                                 {
-                                    parent.Values = vals.Where(x => x != null);
+                                    parent.Values = materialized;
                                 }
-                                else 
+                                else
                                 {
                                     parent.Type = ConditionType.IsNull;
                                 }
@@ -682,8 +720,8 @@ namespace Birko.Data.SQL
                 return false;
             if (condition.Values is IEnumerable<object> vals)
             {
-                var list = vals.ToList();
-                if (list.Count == 1 && list[0] is bool b)
+                using var en = vals.GetEnumerator();
+                if (en.MoveNext() && en.Current is bool b && !en.MoveNext())
                 {
                     value = condition.IsNot ? !b : b;
                     return true;
@@ -729,6 +767,19 @@ namespace Birko.Data.SQL
                 return new[] { parent };
             }
             return new[] { surviving };
+        }
+
+        /// <summary>
+        /// Returns the bool value of an expression without allocating a Condition object.
+        /// Handles literal constants and parameter-free closure expressions.
+        /// Returns null when the expression references a lambda parameter (must go through normal parsing).
+        /// </summary>
+        private static bool? TryGetLiteralBool(Expression expr)
+        {
+            if (expr is ConstantExpression ce && ce.Value is bool b) return b;
+            if (ContainsParameter(expr)) return null;
+            try { return EvaluateExpression(expr) as bool?; }
+            catch { return null; }
         }
 
         private static object? EvaluateExpression(Expression expr)
@@ -791,14 +842,13 @@ namespace Birko.Data.SQL
             // does not reference any unbound ParameterExpressions (lambda parameters like 'u').
             if (!ContainsParameter(expr))
             {
-                var cacheKey = expr.ToString();
-                var func = _expressionCache.GetOrAdd(cacheKey, _ =>
+                var func = _expressionCache.GetOrAdd(expr, static e =>
                 {
                     // Box value types (Guid, int, bool, enum, DateTime) so the compiled
                     // delegate is always Func<object>, not Func<T>.
-                    var body = expr.Type.IsValueType
-                        ? Expression.Convert(expr, typeof(object))
-                        : expr;
+                    var body = e.Type.IsValueType
+                        ? Expression.Convert(e, typeof(object))
+                        : e;
                     var lambda = Expression.Lambda<Func<object>>(body);
                     return lambda.Compile();
                 });
@@ -810,9 +860,16 @@ namespace Birko.Data.SQL
 
         /// <summary>
         /// Checks whether the expression tree contains any ParameterExpression (lambda parameters).
-        /// Expressions with unbound parameters cannot be compiled as parameterless lambdas.
+        /// Results are memoized by expression reference so repeated calls on the same node are O(1).
         /// </summary>
         private static bool ContainsParameter(Expression expr)
+        {
+            return _containsParamCache
+                .GetOrAdd(expr, static e => new System.Runtime.CompilerServices.StrongBox<bool>(ContainsParameterCore(e)))
+                .Value;
+        }
+
+        private static bool ContainsParameterCore(Expression expr)
         {
             if (expr is LambdaExpression lambda)
                 return lambda.Parameters.Count > 0;

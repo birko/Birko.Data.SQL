@@ -9,6 +9,7 @@ namespace Birko.Data.SQL.Connectors
 {
     public abstract partial class AbstractConnector
     {
+
         public IEnumerable<object> Select<T, P>(Type type, LambdaExpression? expr = null, IDictionary<Expression<Func<T, P>>, bool>? orderFields = null, int? limit = null, int? offset = null)
         {
             foreach (var o in Select(type, (expr != null) ? DataBase.ParseConditionExpression(expr) : null, orderFields?.ToDictionary(x => DataBase.GetField(x.Key).GetSelectName(false), x => x.Value), limit, offset))
@@ -56,14 +57,19 @@ namespace Birko.Data.SQL.Connectors
                 yield break;
             }
 
-            foreach (var set in Select(types.Select(x => DataBase.LoadTable(x)), (fields, reader) =>
+            // Materialize once; pre-load factories and fields outside the per-row loop.
+            var typeArray = types.ToArray();
+            var factories = typeArray.Select(DataBase.GetOrCreateInstanceFactory).ToArray();
+            var fieldSets = typeArray.Select(DataBase.LoadFields).ToArray();
+
+            foreach (var set in Select(typeArray.Select(x => DataBase.LoadTable(x)), (_, reader) =>
             {
                 var index = 0;
                 List<object> objects = new();
-                foreach (var type in types)
+                for (int ti = 0; ti < typeArray.Length; ti++)
                 {
-                    var data = Activator.CreateInstance(type, Array.Empty<object>())!;
-                    index = DataBase.Read(reader, data, index);
+                    var data = factories[ti]();
+                    index = DataBase.Read(fieldSets[ti], reader, data, index);
                     objects.Add(data);
                 }
                 return objects.AsEnumerable();

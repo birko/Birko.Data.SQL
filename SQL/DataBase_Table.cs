@@ -59,74 +59,82 @@ namespace Birko.Data.SQL
 
         public static Tables.Table LoadTable(Type type)
         {
-            return _tableCache.GetOrAdd(type, t =>
+            if (_tableCache.TryGetValue(type, out var cached))
+                return cached;
+
+            var table = ComputeTable(type);
+            if (table != null)
+                _tableCache.TryAdd(type, table);
+            return table!;
+        }
+
+        private static Tables.Table? ComputeTable(Type type)
+        {
+            // Check both Birko and DataAnnotations table attributes.
+            // Use name-based matching for Birko.Data.SQL.Attributes.Table to handle
+            // shared-project type identity issues (same attribute compiled into multiple assemblies).
+            IEnumerable<object> attrs = type.GetCustomAttributes(true)
+                .Where(a => a is Birko.Data.SQL.Attributes.Table
+                         || a is System.ComponentModel.DataAnnotations.Schema.TableAttribute
+                         || a.GetType().FullName == "Birko.Data.SQL.Attributes.Table");
+            if (attrs != null)
             {
-                // Check both Birko and DataAnnotations table attributes.
-                // Use name-based matching for Birko.Data.SQL.Attributes.Table to handle
-                // shared-project type identity issues (same attribute compiled into multiple assemblies).
-                IEnumerable<object> attrs = t.GetCustomAttributes(true)
-                    .Where(a => a is Birko.Data.SQL.Attributes.Table
-                             || a is System.ComponentModel.DataAnnotations.Schema.TableAttribute
-                             || a.GetType().FullName == "Birko.Data.SQL.Attributes.Table");
-                if (attrs != null)
+                foreach (Attribute attr in attrs)
                 {
-                    foreach (Attribute attr in attrs)
+                    string? tableName = null;
+                    if (attr is Birko.Data.SQL.Attributes.Table birkoTable)
                     {
-                        string? tableName = null;
-                        if (attr is Birko.Data.SQL.Attributes.Table birkoTable)
+                        tableName = birkoTable.Name;
+                    }
+                    else if (attr is System.ComponentModel.DataAnnotations.Schema.TableAttribute dataTable)
+                    {
+                        tableName = dataTable.Name;
+                    }
+                    else if (attr.GetType().FullName == "Birko.Data.SQL.Attributes.Table")
+                    {
+                        // Cross-assembly shared-project attribute — read Name via reflection
+                        tableName = attr.GetType().GetProperty("Name")?.GetValue(attr) as string;
+                    }
+                    if (!string.IsNullOrEmpty(tableName))
+                    {
+                        Tables.Table table = new Tables.Table()
                         {
-                            tableName = birkoTable.Name;
-                        }
-                        else if (attr is System.ComponentModel.DataAnnotations.Schema.TableAttribute dataTable)
+                            Name = tableName,
+                            Type = type,
+                            Fields = LoadFields(type).ToDictionary(x => x.Name),
+                        };
+                        if (table.Fields != null && table.Fields.Any())
                         {
-                            tableName = dataTable.Name;
-                        }
-                        else if (attr.GetType().FullName == "Birko.Data.SQL.Attributes.Table")
-                        {
-                            // Cross-assembly shared-project attribute — read Name via reflection
-                            tableName = attr.GetType().GetProperty("Name")?.GetValue(attr) as string;
-                        }
-                        if (!string.IsNullOrEmpty(tableName))
-                        {
-                            Tables.Table table = new Tables.Table()
+                            foreach (var field in table.Fields)
                             {
-                                Name = tableName,
-                                Type = t,
-                                Fields = LoadFields(t).ToDictionary(x => x.Name),
-                            };
-                            if (table.Fields != null && table.Fields.Any())
-                            {
-                                foreach (var field in table.Fields)
-                                {
-                                    field.Value.Table = table;
-                                }
-                                table.Indexes = LoadIndexes(t, table.Fields);
-                                return table;
+                                field.Value.Table = table;
                             }
+                            table.Indexes = LoadIndexes(type, table.Fields);
+                            return table;
                         }
                     }
                 }
+            }
 
-                // Fallback: check fluent mapping overrides (registered via RegisterTableName)
-                if (_tableNameOverrides.TryGetValue(t, out var overrideName))
+            // Fallback: check fluent mapping overrides (registered via RegisterTableName)
+            if (_tableNameOverrides.TryGetValue(type, out var overrideName))
+            {
+                var table = new Tables.Table()
                 {
-                    var table = new Tables.Table()
-                    {
-                        Name = overrideName,
-                        Type = t,
-                        Fields = LoadFields(t).ToDictionary(x => x.Name),
-                    };
-                    if (table.Fields != null && table.Fields.Any())
-                    {
-                        foreach (var field in table.Fields)
-                            field.Value.Table = table;
-                        table.Indexes = LoadIndexes(t, table.Fields);
-                        return table;
-                    }
+                    Name = overrideName,
+                    Type = type,
+                    Fields = LoadFields(type).ToDictionary(x => x.Name),
+                };
+                if (table.Fields != null && table.Fields.Any())
+                {
+                    foreach (var field in table.Fields)
+                        field.Value.Table = table;
+                    table.Indexes = LoadIndexes(type, table.Fields);
+                    return table;
                 }
+            }
 
-                return null!;
-            });
+            return null;
         }
 
         public static Dictionary<string, IndexDefinition> LoadIndexes(Type type, Dictionary<string, AbstractField> fields)

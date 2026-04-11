@@ -14,7 +14,7 @@ namespace Birko.Data.SQL
     {
         internal static readonly ConcurrentDictionary<Type, IEnumerable<Fields.AbstractField>> _fieldsCache = new();
 
-        private static IEnumerable<AbstractField> LoadFields(Type type)
+        internal static IEnumerable<AbstractField> LoadFields(Type type)
         {
             return _fieldsCache.GetOrAdd(type, t =>
             {

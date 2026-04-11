@@ -55,8 +55,7 @@ namespace Birko.Data.SQL.Connectors.Strategies
             if (!condition.IsField && first != null)
             {
                 var paramName = context.GenerateParameterName(condition.Name!, 0, command);
-                var escapedValue = context.EscapeValue(first);
-                context.AddParameter(command, paramName, escapedValue);
+                context.AddParameter(command, paramName, first);
                 return paramName;
             }
             else

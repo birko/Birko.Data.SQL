@@ -103,6 +103,7 @@ namespace Birko.Data.SQL.Stores
         protected override async Task InitCoreAsync(CancellationToken ct = default)
         {
             if (Connector == null) return;
+            await Task.Run(() => Connector.CreateTable(new[] { typeof(T) }), ct).ConfigureAwait(false);
             if (AsyncConnector != null)
                 await AsyncConnector.DoInitAsync(ct);
             else

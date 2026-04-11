@@ -9,6 +9,9 @@ namespace Birko.Data.SQL.Connectors
     /// </summary>
     public class SqlBuilderContext
     {
+        private static readonly System.Text.RegularExpressions.Regex _sanitizeRegex =
+            new(@"[^a-zA-Z0-9_]", System.Text.RegularExpressions.RegexOptions.Compiled);
+
         private readonly StringBuilder _stringBuilder;
         private readonly AbstractConnectorBase _connector;
 
@@ -29,7 +32,7 @@ namespace Birko.Data.SQL.Connectors
             }
 
             var count = command.Parameters?.Count ?? 0;
-            var sanitizedName = System.Text.RegularExpressions.Regex.Replace(fieldName, @"[^a-zA-Z0-9_]", string.Empty);
+            var sanitizedName = _sanitizeRegex.Replace(fieldName, string.Empty);
             return $"@WHERE{sanitizedName}{index}_{count}";
         }
 

@@ -58,14 +58,19 @@ namespace Birko.Data.SQL.Connectors
                 yield break;
             }
 
-            await foreach (var set in SelectAsync(types.Select(x => DataBase.LoadTable(x)), async (fields, reader) =>
+            // Materialize once; pre-load factories and fields outside the per-row loop.
+            var typeArray = types.ToArray();
+            var factories = typeArray.Select(DataBase.GetOrCreateInstanceFactory).ToArray();
+            var fieldSets = typeArray.Select(DataBase.LoadFields).ToArray();
+
+            await foreach (var set in SelectAsync(typeArray.Select(x => DataBase.LoadTable(x)), async (_, reader) =>
             {
                 var index = 0;
                 List<object> objects = new();
-                foreach (var type in types)
+                for (int ti = 0; ti < typeArray.Length; ti++)
                 {
-                    var data = Activator.CreateInstance(type, Array.Empty<object>())!;
-                    index = DataBase.Read(reader, data, index);
+                    var data = factories[ti]();
+                    index = DataBase.Read(fieldSets[ti], reader, data, index);
                     objects.Add(data);
                 }
                 return objects.AsEnumerable();

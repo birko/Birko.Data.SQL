@@ -97,8 +97,8 @@ namespace Birko.Data.SQL.Connectors
             }
         }
 
-        // Strategy pattern for condition building
-        private readonly List<IConditionStrategy> _conditionStrategies = new();
+        // Strategy pattern for condition building — keyed by ConditionType for O(1) dispatch
+        private readonly Dictionary<Conditions.ConditionType, IConditionStrategy> _conditionStrategyMap = new();
 
         protected AbstractConnectorBase(PasswordSettings settings)
         {
@@ -111,11 +111,18 @@ namespace Birko.Data.SQL.Connectors
         /// </summary>
         private void InitializeConditionStrategies()
         {
-            _conditionStrategies.Add(new Strategies.EqualConditionStrategy());
-            _conditionStrategies.Add(new Strategies.ComparisonConditionStrategy());
-            _conditionStrategies.Add(new Strategies.LikeConditionStrategy());
-            _conditionStrategies.Add(new Strategies.InConditionStrategy());
-            _conditionStrategies.Add(new Strategies.NullConditionStrategy());
+            IConditionStrategy[] strategies =
+            [
+                new Strategies.EqualConditionStrategy(),
+                new Strategies.ComparisonConditionStrategy(),
+                new Strategies.LikeConditionStrategy(),
+                new Strategies.InConditionStrategy(),
+                new Strategies.NullConditionStrategy(),
+            ];
+            foreach (var strategy in strategies)
+                foreach (Conditions.ConditionType ct in Enum.GetValues<Conditions.ConditionType>())
+                    if (strategy.CanHandle(ct))
+                        _conditionStrategyMap[ct] = strategy;
         }
 
         /// <summary>
@@ -187,88 +194,83 @@ namespace Birko.Data.SQL.Connectors
         }
 
         /// <summary>
-        /// Builds a SQL condition clause using the strategy pattern
+        /// Builds a SQL condition clause. Allocates one StringBuilder for the entire
+        /// condition tree (shared across all nested levels).
         /// </summary>
         public virtual string ConditionDefinition(Conditions.Condition condition, DbCommand command)
         {
             if (condition == null) return string.Empty;
-
-            // Handle subconditions (nested conditions with AND/OR logic)
-            if (condition.SubConditions?.Any() == true)
-            {
-                return BuildSubConditions(condition, command);
-            }
-
-            // Handle single condition
-            return BuildSingleCondition(condition, command);
+            var sb = new StringBuilder();
+            AppendConditionTo(sb, condition, command);
+            return sb.ToString();
         }
 
         /// <summary>
-        /// Builds SQL for nested/sub conditions
+        /// Appends the SQL for <paramref name="condition"/> to a shared <paramref name="sb"/>,
+        /// avoiding per-level StringBuilder allocations in nested AND/OR trees.
         /// </summary>
-        private string BuildSubConditions(Conditions.Condition condition, DbCommand command)
+        private void AppendConditionTo(StringBuilder sb, Conditions.Condition condition, DbCommand command)
         {
-            // Pass the parent's IsOr flag to subconditions so they're joined correctly.
-            // The parser sets IsOr on the parent, but subconditions default to IsOr=false.
-            if (condition.IsOr && condition.SubConditions != null)
-            {
-                foreach (var sub in condition.SubConditions)
-                {
-                    sub.IsOr = true;
-                }
-            }
-            var subConditionsSql = ConditionDefinition(condition.SubConditions!, command);
-            var needsParens = condition.SubConditions!.Count() > 1;
-            return needsParens ? $"({subConditionsSql})" : subConditionsSql;
+            if (condition.SubConditions?.Any() == true)
+                AppendSubConditionsTo(sb, condition, command);
+            else
+                sb.Append(BuildSingleCondition(condition, command));
         }
 
         /// <summary>
-        /// Builds SQL for a single condition using the appropriate strategy
+        /// Appends nested sub-conditions to <paramref name="sb"/> using the parent's IsOr flag
+        /// as the join operator — no in-place mutation of sub.IsOr.
+        /// Wraps in parentheses when there are two or more children.
+        /// </summary>
+        private void AppendSubConditionsTo(StringBuilder sb, Conditions.Condition condition, DbCommand command)
+        {
+            var separator = condition.IsOr ? " OR " : " AND ";
+            int startIndex = sb.Length;
+            int count = 0;
+            foreach (var sub in condition.SubConditions!)
+            {
+                if (count > 0) sb.Append(separator);
+                AppendConditionTo(sb, sub, command);
+                count++;
+            }
+            if (count > 1)
+            {
+                sb.Insert(startIndex, '(');
+                sb.Append(')');
+            }
+        }
+
+        /// <summary>
+        /// Builds SQL for a single condition using the appropriate strategy.
         /// </summary>
         private string BuildSingleCondition(Conditions.Condition condition, DbCommand command)
         {
             if (string.IsNullOrEmpty(condition.Name))
-            {
                 throw new InvalidOperationException("Condition name cannot be null or empty for non-subconditions");
-            }
 
-            var strategy = _conditionStrategies.FirstOrDefault(s => s.CanHandle(condition.Type));
-            if (strategy == null)
-            {
+            if (!_conditionStrategyMap.TryGetValue(condition.Type, out var strategy))
                 throw new NotSupportedException($"Condition type {condition.Type} is not supported");
-            }
 
             var context = new SqlBuilderContext(this);
             return strategy.BuildSql(condition, command, context);
         }
 
         /// <summary>
-        /// Builds SQL for multiple conditions
+        /// Builds SQL for multiple conditions using a single shared StringBuilder.
         /// </summary>
         public virtual string ConditionDefinition(IEnumerable<Conditions.Condition>? conditions, DbCommand command)
         {
-            var result = new StringBuilder();
-            if (conditions != null && conditions.Any())
+            if (conditions == null) return string.Empty;
+            using var en = conditions.GetEnumerator();
+            if (!en.MoveNext()) return string.Empty;
+            var sb = new StringBuilder();
+            AppendConditionTo(sb, en.Current, command);
+            while (en.MoveNext())
             {
-                int i = 0;
-                foreach (var condition in conditions)
-                {
-                    if (i > 0)
-                    {
-                        if (condition.IsOr)
-                        {
-                            result.Append(" OR ");
-                        }
-                        else
-                        {
-                            result.Append(" AND ");
-                        }
-                    }
-                    result.Append(ConditionDefinition(condition, command));
-                    i++;
-                }
+                sb.Append(en.Current.IsOr ? " OR " : " AND ");
+                AppendConditionTo(sb, en.Current, command);
             }
-            return result.ToString();
+            return sb.ToString();
         }
 
         /// <summary>
@@ -317,11 +319,10 @@ namespace Birko.Data.SQL.Connectors
         /// </summary>
         public virtual DbCommand? AddWhere(IEnumerable<Conditions.Condition>? conditions, DbCommand? command)
         {
-            if (command != null && conditions != null && conditions.Any())
-            {
-                command.CommandText += " WHERE ";
-                command.CommandText += ConditionDefinition(conditions, command);
-            }
+            if (command == null || conditions == null) return command;
+            var sql = ConditionDefinition(conditions, command);
+            if (!string.IsNullOrEmpty(sql))
+                command.CommandText += " WHERE " + sql;
             return command;
         }
 
