@@ -190,6 +190,16 @@ namespace Birko.Data.SQL
                         result.Append(")");
                         return result.ToString();
                     }
+                    else if (callExpression.Method.Name is "ToLower" or "ToLowerInvariant")
+                    {
+                        var inner = ParseExpression(callExpression.Object!, parameters, withTableName, exprType);
+                        return $"LOWER({inner})";
+                    }
+                    else if (callExpression.Method.Name is "ToUpper" or "ToUpperInvariant")
+                    {
+                        var inner = ParseExpression(callExpression.Object!, parameters, withTableName, exprType);
+                        return $"UPPER({inner})";
+                    }
                     else
                     {
                         var key = "@Const" + parameters.Count;
@@ -490,6 +500,35 @@ namespace Birko.Data.SQL
                                 ? ConditionType.Like
                                 : ConditionType.In;
                             break;
+                        case "ToLower":
+                        case "ToLowerInvariant":
+                            {
+                                // Unwrap ToLower: recurse into the Object, then wrap column name with LOWER()
+                                if (methodExpression.Object != null)
+                                {
+                                    var inner = new Conditions.Condition(null, null);
+                                    ParseConditionExpression(methodExpression.Object, inner, exprType);
+                                    if (!string.IsNullOrEmpty(inner.Name))
+                                    {
+                                        condition.Name = $"LOWER({inner.Name})";
+                                    }
+                                }
+                                return new[] { condition };
+                            }
+                        case "ToUpper":
+                        case "ToUpperInvariant":
+                            {
+                                if (methodExpression.Object != null)
+                                {
+                                    var inner = new Conditions.Condition(null, null);
+                                    ParseConditionExpression(methodExpression.Object, inner, exprType);
+                                    if (!string.IsNullOrEmpty(inner.Name))
+                                    {
+                                        condition.Name = $"UPPER({inner.Name})";
+                                    }
+                                }
+                                return new[] { condition };
+                            }
                     }
                     if (methodExpression.Arguments != null && methodExpression.Arguments.Any())
                     {
