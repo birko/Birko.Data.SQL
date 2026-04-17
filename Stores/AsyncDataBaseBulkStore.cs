@@ -17,7 +17,7 @@ namespace Birko.Data.SQL.Stores
     /// </summary>
     /// <typeparam name="DB">The type of database connector, must inherit from <see cref="AbstractConnector"/>.</typeparam>
     /// <typeparam name="T">The type of entity, must inherit from <see cref="Models.AbstractModel"/>.</typeparam>
-    public class AsyncDataBaseBulkStore<DB, T> : AsyncDataBaseStore<DB, T>, IAsyncBulkStore<T>
+    public class AsyncDataBaseBulkStore<DB, T> : AsyncDataBaseStore<DB, T>, IAsyncBulkStore<T>, IAsyncAggregatableStore<T>
         where T : Models.AbstractModel
         where DB : AbstractConnector
     {
@@ -203,6 +203,29 @@ namespace Birko.Data.SQL.Stores
                 await AsyncConnector.DeleteAsync(typeof(T), filter as LambdaExpression, ct);
             else
                 await Task.Run(() => Connector!.Delete(typeof(T), filter as LambdaExpression), ct);
+        }
+
+        #endregion
+
+        #region Aggregation
+
+        /// <summary>
+        /// Executes an aggregation query using SQL GROUP BY.
+        /// </summary>
+        public async Task<IReadOnlyList<AggregateResult>> AggregateAsync(
+            AggregateQuery<T> query,
+            CancellationToken ct = default)
+        {
+            await EnsureInitializedAsync(ct).ConfigureAwait(false);
+            if (AsyncConnector == null || Connector == null)
+                return Array.Empty<AggregateResult>();
+
+            var results = new List<AggregateResult>();
+            await foreach (var row in AsyncConnector.SelectAggregateAsync(typeof(T), query, ct))
+            {
+                results.Add(row);
+            }
+            return results.AsReadOnly();
         }
 
         #endregion

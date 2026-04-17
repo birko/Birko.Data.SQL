@@ -335,6 +335,100 @@ namespace Birko.Data.SQL.Connectors
         }
 
         /// <summary>
+        /// Returns the SQL aggregate function name for the given aggregate function.
+        /// Shared by store-level and view-level aggregation.
+        /// </summary>
+        public static string GetSqlFunctionName(Birko.Data.Stores.AggregateFunction function)
+        {
+            return function switch
+            {
+                Birko.Data.Stores.AggregateFunction.Count => "COUNT",
+                Birko.Data.Stores.AggregateFunction.Sum => "SUM",
+                Birko.Data.Stores.AggregateFunction.Avg => "AVG",
+                Birko.Data.Stores.AggregateFunction.Min => "MIN",
+                Birko.Data.Stores.AggregateFunction.Max => "MAX",
+                _ => throw new NotSupportedException($"Aggregate function {function} is not supported")
+            };
+        }
+
+        /// <summary>
+        /// Resolves a C# property name to its SQL column name using loaded field metadata.
+        /// </summary>
+        protected static string ResolveSqlName(IEnumerable<Birko.Data.SQL.Fields.AbstractField> fields, string propertyName)
+        {
+            var field = fields.FirstOrDefault(f =>
+                f.Property.Name.Equals(propertyName, StringComparison.OrdinalIgnoreCase));
+            if (field != null)
+                return field.Name;
+
+            // Fallback: use property name as-is
+            return propertyName;
+        }
+
+        /// <summary>
+        /// Builds SELECT and GROUP BY field dictionaries for an aggregation query.
+        /// Shared by sync and async aggregate connectors to avoid duplicating query-building logic.
+        /// </summary>
+        protected (Dictionary<int, string> fields, Dictionary<int, string> groupFields, IEnumerable<Conditions.Condition>? conditions) BuildAggregateQueryParts<T>(
+            Type type,
+            Birko.Data.Stores.AggregateQuery<T> query)
+            where T : Models.AbstractModel
+        {
+            var fields = new Dictionary<int, string>();
+            var groupFields = new Dictionary<int, string>();
+            int idx = 0;
+
+            var allFields = DataBase.LoadFields(type);
+            foreach (var groupBy in query.GroupByFields)
+            {
+                var sqlName = ResolveSqlName(allFields, groupBy);
+                fields[idx] = sqlName;
+                groupFields[idx] = sqlName;
+                idx++;
+            }
+
+            if (!string.IsNullOrEmpty(query.TimeBucketInterval) && !string.IsNullOrEmpty(query.TimeColumn))
+            {
+                var timeCol = ResolveSqlName(allFields, query.TimeColumn);
+                var interval = Birko.Data.Stores.TimeIntervalParser.ToSqlInterval(query.TimeBucketInterval);
+                fields[idx] = $"time_bucket('{interval}', {timeCol}) AS bucket_time";
+                groupFields[idx] = "bucket_time";
+                idx++;
+            }
+
+            foreach (var agg in query.Aggregates)
+            {
+                var alias = agg.ResolvedAlias;
+                var funcName = GetSqlFunctionName(agg.Function);
+                var sqlFunc = agg.Function == Birko.Data.Stores.AggregateFunction.Count
+                    ? "COUNT(*)"
+                    : $"{funcName}({ResolveSqlName(allFields, agg.SourcePropertyName)})";
+                fields[idx] = $"{sqlFunc} AS {QuoteIdentifier(alias)}";
+                idx++;
+            }
+
+            var conditions = query.Filter != null
+                ? DataBase.ParseConditionExpression(query.Filter as System.Linq.Expressions.LambdaExpression)
+                : null;
+
+            return (fields, groupFields, conditions);
+        }
+
+        /// <summary>
+        /// Maps a <see cref="DbDataReader"/> row to an <see cref="Birko.Data.Stores.AggregateResult"/>.
+        /// Shared by sync and async aggregate connectors.
+        /// </summary>
+        protected static Birko.Data.Stores.AggregateResult ReadAggregateResult(DbDataReader reader)
+        {
+            var dict = new Dictionary<string, object?>();
+            for (int i = 0; i < reader.FieldCount; i++)
+            {
+                dict[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+            }
+            return new Birko.Data.Stores.AggregateResult(dict);
+        }
+
+        /// <summary>
         /// Creates a SELECT command with joins, conditions, grouping, order, limit and offset.
         /// </summary>
         public virtual DbCommand CreateSelectCommand(DbCommand command, IEnumerable<string> tableNames, IDictionary<int, string> fields, IEnumerable<Conditions.Join>? joinconditions = null, IEnumerable<Conditions.Condition>? conditions = null, IDictionary<int, string>? groupFields = null, IDictionary<string, bool>? orderFields = null, int? limit = null, int? offset = null)

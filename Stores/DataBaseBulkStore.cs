@@ -15,7 +15,7 @@ namespace Birko.Data.SQL.Stores
     /// </summary>
     /// <typeparam name="DB">The type of database connector, must inherit from <see cref="AbstractConnector"/>.</typeparam>
     /// <typeparam name="T">The type of entity, must inherit from <see cref="Models.AbstractModel"/>.</typeparam>
-    public class DataBaseBulkStore<DB, T> : DataBaseStore<DB, T>, IBulkStore<T>
+    public class DataBaseBulkStore<DB, T> : DataBaseStore<DB, T>, IBulkStore<T>, IAggregatableStore<T>
         where T : Models.AbstractModel
         where DB : AbstractConnector
     {
@@ -146,6 +146,26 @@ namespace Birko.Data.SQL.Stores
             EnsureInitialized();
             if (Connector == null) return;
             Connector.Delete(typeof(T), filter as LambdaExpression);
+        }
+
+        #endregion
+
+        #region Aggregation
+
+        /// <summary>
+        /// Executes a synchronous aggregation query using SQL GROUP BY.
+        /// </summary>
+        public IReadOnlyList<AggregateResult> Aggregate(AggregateQuery<T> query)
+        {
+            EnsureInitialized();
+            if (Connector == null) return Array.Empty<AggregateResult>();
+
+            var results = new List<AggregateResult>();
+            foreach (var row in Connector.SelectAggregate(typeof(T), query))
+            {
+                results.Add(row);
+            }
+            return results.AsReadOnly();
         }
 
         #endregion

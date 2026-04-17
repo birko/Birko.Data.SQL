@@ -23,6 +23,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\AbstractAsyncConnector_Drop.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\AbstractAsyncConnector_Insert.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\AbstractAsyncConnector_Select.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\AbstractAsyncConnector_Aggregate.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\AbstractAsyncConnector_SelectCount.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\AbstractAsyncConnector_Update.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\AbstractConnector.cs" />
@@ -34,6 +35,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\AbstractConnector_Drop.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\AbstractConnector_Insert.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\AbstractConnector_Select.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\AbstractConnector_Aggregate.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\AbstractConnector_SelectCount.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\AbstractConnector_Update.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\IConditionStrategy.cs" />
