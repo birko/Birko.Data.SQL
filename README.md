@@ -84,7 +84,26 @@ Standard `System.ComponentModel.DataAnnotations` attributes are recognized along
 
 ### Settings
 
-Uses `RemoteSettings` for connection: `Server`, `Port`, `Database`, `UserName`, `Password`
+Uses `SqlSettings` (extends `RemoteSettings`) with `CommandTimeout`, `ConnectionTimeout`, and abstract `GetConnectionString()` overridden by each provider:
+
+- **MSSqlSettings** — `MultipleActiveResultSets`, `TrustServerCertificate`
+- **MySqlSettings** — `BulkInsertBatchSize`
+- **PostgreSqlSettings** — `UseBinaryImport`
+- **SqLiteSettings** (extends `PasswordSettings`) — `CommandTimeout`
+
+```csharp
+var settings = new MSSqlSettings
+{
+    Location = "localhost",
+    Name = "MyDatabase",
+    UserName = "sa",
+    Password = "password",
+    TrustServerCertificate = true,
+    CommandTimeout = 60
+};
+var store = new MSSqlStore<Customer>();
+store.SetSettings(settings);
+```
 
 ### Index Management
 

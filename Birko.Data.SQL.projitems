@@ -72,6 +72,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)Stores\AsyncDataBaseStore.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Stores\AsyncDataBaseBulkStore.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Stores\SqlTransactionContext.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Stores\SqlSettings.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)UnitOfWork\SqlUnitOfWork.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\IndexManagement\SqlIndexManager.cs" />
   </ItemGroup>

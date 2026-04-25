@@ -143,12 +143,21 @@ public class CustomerStore : DataBaseStore<SqlConnection, Customer>, IStore<Cust
 
 ## Settings
 
-SQL stores use `RemoteSettings` for connection:
-- `Server` - Database server address
-- `Port` - Database port (if applicable)
-- `Database` - Database name
-- `UserName` - Database user
-- `Password` - Database password
+### SqlSettings (Birko.Data.SQL.Stores)
+Base settings class for all SQL providers, extending `RemoteSettings`:
+- `CommandTimeout` (default: 30 seconds) — SQL command execution timeout
+- `ConnectionTimeout` (default: 15 seconds) — connection attempt timeout
+- Abstract `GetConnectionString()` — overridden by each SQL provider
+
+Provider-specific settings extend `SqlSettings`:
+- `MSSqlSettings` — `MultipleActiveResultSets`, `TrustServerCertificate`
+- `MySqlSettings` — `BulkInsertBatchSize`
+- `PostgreSqlSettings` — `UseBinaryImport`
+
+SQLite uses `SqLiteSettings` (extends `PasswordSettings`, not `SqlSettings`).
+
+### Legacy Settings (still supported)
+SQL stores still accept `RemoteSettings` / `PasswordSettings` via `SetSettings(ISettings)`. The connector's `CreateConnection` checks for typed settings first and falls back to the legacy format.
 
 Pass settings via `base.SetSettings()`:
 ```csharp
