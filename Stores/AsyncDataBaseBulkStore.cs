@@ -77,6 +77,14 @@ namespace Birko.Data.SQL.Stores
             return await ReadAsync(null, null, null, null, ct);
         }
 
+        /// <inheritdoc />
+        public virtual Task<T?> ReadFirstAsync(Expression<Func<T, bool>>? filter = null, CancellationToken ct = default)
+        {
+            // base = AsyncDataBaseStore<DB, T> — resolves to the single-result ReadAsync(filter, ct)
+            // (LIMIT 1 via ReadCoreAsync) the bulk overload hides here.
+            return base.ReadAsync(filter, ct);
+        }
+
         #endregion
 
         #region Bulk Write Operations

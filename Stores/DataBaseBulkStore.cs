@@ -50,6 +50,14 @@ namespace Birko.Data.SQL.Stores
             return Read(null, null, null, null);
         }
 
+        /// <inheritdoc />
+        public virtual T? ReadFirst(Expression<Func<T, bool>>? filter = null)
+        {
+            // base = DataBaseStore<DB, T> — resolves to the single-result Read(filter) (LIMIT 1 via ReadCore)
+            // the bulk overload hides here.
+            return base.Read(filter);
+        }
+
         #endregion
 
         #region Bulk Write Operations
