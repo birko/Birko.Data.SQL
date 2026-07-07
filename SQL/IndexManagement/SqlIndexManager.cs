@@ -96,7 +96,7 @@ namespace Birko.Data.SQL.IndexManagement
         }
 
         /// <inheritdoc />
-        public async Task<IReadOnlyList<Patterns.IndexManagement.IndexInfo>> ListAsync(string? scope = null, CancellationToken ct = default)
+        public virtual async Task<IReadOnlyList<Patterns.IndexManagement.IndexInfo>> ListAsync(string? scope = null, CancellationToken ct = default)
         {
             ValidateScope(scope);
 
