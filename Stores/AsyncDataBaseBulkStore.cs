@@ -58,7 +58,7 @@ namespace Birko.Data.SQL.Stores
             if (AsyncConnector != null)
             {
                 var items = new List<T>();
-                await foreach (var item in AsyncConnector.SelectAsync(typeof(T), filter as LambdaExpression, orderBy?.ToDictionary(), limit, offset))
+                await foreach (var item in AsyncConnector.SelectAsync(typeof(T), filter as LambdaExpression, orderBy?.ToDictionary(), limit, offset, ct))
                 {
                     if (item is T typed) items.Add(typed);
                 }

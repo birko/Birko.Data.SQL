@@ -38,7 +38,8 @@ namespace Birko.Data.SQL.Connectors
                         query.Offset);
                     await Task.CompletedTask;
                 },
-                async reader => new[] { ReadAggregateResult(reader) }))
+                async reader => new[] { ReadAggregateResult(reader) },
+                ct))
             {
                 foreach (var item in row) yield return (AggregateResult)item;
             }

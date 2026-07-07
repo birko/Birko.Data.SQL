@@ -144,7 +144,7 @@ namespace Birko.Data.SQL.Stores
 
             if (AsyncConnector != null)
             {
-                await foreach (var item in AsyncConnector.SelectAsync(typeof(T), filter as LambdaExpression, null, 1, null))
+                await foreach (var item in AsyncConnector.SelectAsync(typeof(T), filter as LambdaExpression, null, 1, null, ct))
                 {
                     if (item is T typed) return typed;
                 }
