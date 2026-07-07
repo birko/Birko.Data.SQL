@@ -16,6 +16,11 @@ namespace Birko.Data.SQL.Connectors
     /// </summary>
     public abstract partial class AbstractAsyncConnector : AbstractConnector
     {
+        // Async serialization gate for isLock=true commands. A monitor `lock` cannot span an await,
+        // so the old `Task.Run(() => { lock (_lock) { return RunCommandAsync(...); } })` released the
+        // lock at the first await — before the DB work ran — providing no mutual exclusion (CR-H082).
+        private readonly SemaphoreSlim _asyncLock = new(1, 1);
+
         public AbstractAsyncConnector(PasswordSettings settings) : base(settings)
         {
         }
@@ -26,39 +31,43 @@ namespace Birko.Data.SQL.Connectors
             return Task.CompletedTask;
         }
 
-        public virtual Task DoCommandAsync(Func<DbCommand, Task> createCommand, Func<DbCommand, Task> executeCommand, bool isLock = false, CancellationToken ct = default)
+        public virtual async Task DoCommandAsync(Func<DbCommand, Task> createCommand, Func<DbCommand, Task> executeCommand, bool isLock = false, CancellationToken ct = default)
         {
             if (!isLock)
             {
-                return RunCommandAsync(createCommand, executeCommand, ct);
+                await RunCommandAsync(createCommand, executeCommand, ct);
+                return;
             }
-            else
+
+            // Hold the async gate across the entire awaited DB operation so concurrent callers are
+            // actually serialized (CR-H082).
+            await _asyncLock.WaitAsync(ct);
+            try
             {
-                return Task.Run(() =>
-                {
-                    lock (_lock)
-                    {
-                        return RunCommandAsync(createCommand, executeCommand, ct);
-                    }
-                }, ct);
+                await RunCommandAsync(createCommand, executeCommand, ct);
+            }
+            finally
+            {
+                _asyncLock.Release();
             }
         }
 
-        public virtual Task DoCommandWithTransactionAsync(Func<DbCommand, Task> createCommand, Func<DbCommand, Task> executeCommand, bool isLock = false, CancellationToken ct = default)
+        public virtual async Task DoCommandWithTransactionAsync(Func<DbCommand, Task> createCommand, Func<DbCommand, Task> executeCommand, bool isLock = false, CancellationToken ct = default)
         {
             if (!isLock)
             {
-                return RunCommandTransactionAsync(createCommand, executeCommand, ct);
+                await RunCommandTransactionAsync(createCommand, executeCommand, ct);
+                return;
             }
-            else
+
+            await _asyncLock.WaitAsync(ct);
+            try
             {
-                return Task.Run(() =>
-                {
-                    lock (_lock)
-                    {
-                        return RunCommandTransactionAsync(createCommand, executeCommand, ct);
-                    }
-                }, ct);
+                await RunCommandTransactionAsync(createCommand, executeCommand, ct);
+            }
+            finally
+            {
+                _asyncLock.Release();
             }
         }
 
@@ -122,7 +131,7 @@ namespace Birko.Data.SQL.Connectors
             }, ct);
         }
 
-        private async IAsyncEnumerable<IEnumerable<object>> RunReaderCommandAsync(Func<DbCommand, Task> createCommand, Func<DbDataReader, Task<IEnumerable<object>>> transformFunction)
+        private async IAsyncEnumerable<IEnumerable<object>> RunReaderCommandAsync(Func<DbCommand, Task> createCommand, Func<DbDataReader, Task<IEnumerable<object>>> transformFunction, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
         {
             if (transformFunction == null)
             {
@@ -130,7 +139,7 @@ namespace Birko.Data.SQL.Connectors
             }
 
             await using var db = CreateConnection(_settings);
-            await db.OpenAsync();
+            await db.OpenAsync(ct);
             string? commandText = null;
             await using (var command = db.CreateCommand())
             {
@@ -147,7 +156,7 @@ namespace Birko.Data.SQL.Connectors
                 DbDataReader reader;
                 try
                 {
-                    reader = await command.ExecuteReaderAsync();
+                    reader = await command.ExecuteReaderAsync(ct);
                 }
                 catch (Exception ex) when (ex.Message.Contains("no such table", StringComparison.OrdinalIgnoreCase))
                 {
@@ -161,7 +170,7 @@ namespace Birko.Data.SQL.Connectors
                 bool isNext = false;
                 try
                 {
-                    isNext = await reader.ReadAsync();
+                    isNext = await reader.ReadAsync(ct);
                 }
                 catch (Exception ex)
                 {
@@ -186,7 +195,7 @@ namespace Birko.Data.SQL.Connectors
                     yield return row;
                     try
                     {
-                        isNext = await reader.ReadAsync();
+                        isNext = await reader.ReadAsync(ct);
                     }
                     catch (Exception ex)
                     {
