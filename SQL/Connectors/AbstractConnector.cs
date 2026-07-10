@@ -114,13 +114,15 @@ namespace Birko.Data.SQL.Connectors
             using (var command = connection.CreateCommand())
             {
                 command.Transaction = transaction;
+                bool faulted = false;
                 try
                 {
                     createCommand?.Invoke(command);
                     commandText = DataBase.GetGeneratedQuery(command);
                     OnExecute?.Invoke(command.CommandText);
                 }
-                catch (Exception ex) { InitException(ex, commandText); }
+                catch (Exception ex) { InitException(ex, commandText); faulted = true; } // CR-M134
+                if (faulted) yield break;
                 DbDataReader reader;
                 try { reader = command.ExecuteReader(); }
                 catch (Exception ex) when (ex.Message.Contains("no such table", StringComparison.OrdinalIgnoreCase)) { yield break; }
@@ -242,6 +244,7 @@ namespace Birko.Data.SQL.Connectors
             string? commandText = null;
             using (var command = db.CreateCommand())
             {
+                bool faulted = false;
                 try
                 {
                     createCommand?.Invoke(command);
@@ -250,7 +253,15 @@ namespace Birko.Data.SQL.Connectors
                 }
                 catch (Exception ex)
                 {
+                    // CR-M134: when an OnException handler is registered InitException returns instead of
+                    // rethrowing — do NOT fall through to ExecuteReader on a command that failed to build,
+                    // which would raise a second, more confusing error (or run a malformed command).
                     InitException(ex, commandText);
+                    faulted = true;
+                }
+                if (faulted)
+                {
+                    yield break;
                 }
                 DbDataReader reader2;
                 try { reader2 = command.ExecuteReader(); }
