@@ -532,9 +532,29 @@ namespace Birko.Data.SQL
                     }
                     if (methodExpression.Arguments != null && methodExpression.Arguments.Any())
                     {
-                        foreach (var arg in methodExpression.Arguments)
+                        // For the string pattern methods (Contains/StartsWith/EndsWith on
+                        // System.String) only the FIRST argument is the search pattern. The
+                        // culture-aware overloads carry extra arguments — a StringComparison,
+                        // a bool ignoreCase, a CultureInfo — that map to no SQL operand. Feeding
+                        // them into the loop overwrote the pattern with the enum/flag value, so
+                        // e.g. Title.Contains(query, StringComparison.OrdinalIgnoreCase) produced
+                        // `Title LIKE '%5%'`. Case-insensitivity is delegated to the column's DB
+                        // collation (SQLite LIKE is already case-insensitive for ASCII); the
+                        // comparison argument is intentionally ignored when building the pattern.
+                        var methodName = methodExpression.Method.Name;
+                        var isStringPatternMethod = methodName == "StartsWith"
+                            || methodName == "EndsWith"
+                            || (methodName == "Contains" && methodExpression.Method.DeclaringType?.Name == "String");
+                        if (isStringPatternMethod)
                         {
-                            ParseConditionExpression(arg, condition, exprType);
+                            ParseConditionExpression(methodExpression.Arguments[0], condition, exprType);
+                        }
+                        else
+                        {
+                            foreach (var arg in methodExpression.Arguments)
+                            {
+                                ParseConditionExpression(arg, condition, exprType);
+                            }
                         }
                     }
                     if (methodExpression.Object != null)
