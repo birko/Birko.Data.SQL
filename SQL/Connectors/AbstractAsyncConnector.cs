@@ -166,7 +166,7 @@ namespace Birko.Data.SQL.Connectors
                 {
                     reader = await command.ExecuteReaderAsync(ct);
                 }
-                catch (Exception ex) when (ex.Message.Contains("no such table", StringComparison.OrdinalIgnoreCase))
+                catch (Exception ex) when (IsMissingTableException(ex))
                 {
                     yield break;
                 }

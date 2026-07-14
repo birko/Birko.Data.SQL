@@ -125,7 +125,7 @@ namespace Birko.Data.SQL.Connectors
                 if (faulted) yield break;
                 DbDataReader reader;
                 try { reader = command.ExecuteReader(); }
-                catch (Exception ex) when (ex.Message.Contains("no such table", StringComparison.OrdinalIgnoreCase)) { yield break; }
+                catch (Exception ex) when (IsMissingTableException(ex)) { yield break; }
                 using var _r = reader;
                 if (!(reader?.HasRows ?? false)) yield break;
                 bool isNext = false;
@@ -265,7 +265,7 @@ namespace Birko.Data.SQL.Connectors
                 }
                 DbDataReader reader2;
                 try { reader2 = command.ExecuteReader(); }
-                catch (Exception ex) when (ex.Message.Contains("no such table", StringComparison.OrdinalIgnoreCase)) { yield break; }
+                catch (Exception ex) when (IsMissingTableException(ex)) { yield break; }
                 using var _r2 = reader2;
                 if (!(reader2?.HasRows ?? false))
                 {

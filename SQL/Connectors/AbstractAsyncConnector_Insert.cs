@@ -61,32 +61,50 @@ namespace Birko.Data.SQL.Connectors
 
         public virtual async Task InsertAsync(string tableName, IEnumerable<IDictionary<string, object>> values, CancellationToken ct = default)
         {
-            if (values != null && values.Any() && values.All(x => x.Any()))
+            if (values == null) return;
+            // Materialize once: values is enumerated for the guard, the first-row schema, and the
+            // per-row bind, and a one-shot/lazy source would otherwise be walked repeatedly.
+            var rows = values as IReadOnlyList<IDictionary<string, object>> ?? values.ToList();
+            if (rows.Count == 0 || !rows.All(x => x.Any())) return;
+
+            var first = rows[0];
+            // The INSERT column list and parameter names are built from the first row, and every row
+            // rebinds parameters by key; a row with a different key set would silently mis-bind (a
+            // missing key leaves the prior row's stale value, an extra key binds an unused parameter).
+            // Require key-set equality rather than mis-binding heterogeneous dictionaries. (CR-L174)
+            var expectedKeys = new HashSet<string>(first.Keys);
+            foreach (var row in rows)
             {
-                var first = values.First();
-                await DoCommandWithTransactionAsync(async (command) =>
+                if (!expectedKeys.SetEquals(row.Keys))
                 {
-                    command.CommandText = "INSERT INTO " + QuoteIdentifier(tableName)
-                                + " (" + string.Join(", ", first.Keys) + ")"
-                                + " VALUES"
-                                + " (" + string.Join(", ", first.Keys.Select(x => "@" + x.Replace(".", string.Empty))) + ")";
-                    foreach (var kvp in first)
+                    throw new ArgumentException(
+                        "All rows in a bulk insert must have the same column set as the first row.",
+                        nameof(values));
+                }
+            }
+
+            await DoCommandWithTransactionAsync(async (command) =>
+            {
+                command.CommandText = "INSERT INTO " + QuoteIdentifier(tableName)
+                            + " (" + string.Join(", ", first.Keys) + ")"
+                            + " VALUES"
+                            + " (" + string.Join(", ", first.Keys.Select(x => "@" + x.Replace(".", string.Empty))) + ")";
+                foreach (var kvp in first)
+                {
+                    AddParameter(command, "@" + kvp.Key.Replace(".", string.Empty), kvp.Value);
+                }
+                await Task.CompletedTask;
+            }, async (command) =>
+            {
+                foreach (var item in rows)
+                {
+                    foreach (var kvp in item)
                     {
                         AddParameter(command, "@" + kvp.Key.Replace(".", string.Empty), kvp.Value);
                     }
-                    await Task.CompletedTask;
-                }, async (command) =>
-                {
-                    foreach (var item in values)
-                    {
-                        foreach (var kvp in item)
-                        {
-                            AddParameter(command, "@" + kvp.Key.Replace(".", string.Empty), kvp.Value);
-                        }
-                        await command.ExecuteNonQueryAsync(ct);
-                    }
-                }, true);
-            }
+                    await command.ExecuteNonQueryAsync(ct);
+                }
+            }, true);
         }
     }
 }

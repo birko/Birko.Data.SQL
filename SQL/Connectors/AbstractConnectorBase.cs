@@ -44,6 +44,18 @@ namespace Birko.Data.SQL.Connectors
         }
 
         /// <summary>
+        /// Determines whether an exception indicates the queried table/relation does not exist, so a
+        /// reader can yield an empty result instead of faulting. The base match is SQLite's wording
+        /// ("no such table"); provider-specific connectors override this to add their own phrasing
+        /// (PostgreSQL: 'relation "x" does not exist', MySQL: "doesn't exist", MSSQL: "Invalid object name").
+        /// Mirrors the <see cref="IsTransientException"/> override pattern.
+        /// </summary>
+        public virtual bool IsMissingTableException(Exception ex)
+        {
+            return ex.Message.Contains("no such table", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
         /// Executes an action with retry logic for transient failures.
         /// </summary>
         protected void ExecuteWithRetry(Action action, string? commandText = null)

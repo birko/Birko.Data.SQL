@@ -45,18 +45,9 @@ public sealed class SqlUnitOfWork : IUnitOfWork<SqlTransactionContext>
     {
         var connector = store.Connector
             ?? throw new InvalidOperationException("Store connector is not initialized. Call SetSettings() first.");
-        // Connector holds settings internally — use its CreateConnection
-        return new SqlUnitOfWork(connector, connector);
-    }
-
-    /// <summary>
-    /// Internal constructor that uses the connector directly (it already has settings via AbstractConnectorBase).
-    /// </summary>
-    private SqlUnitOfWork(AbstractConnectorBase connector, AbstractConnectorBase _)
-    {
-        _connector = connector;
-        // Settings are accessed via CreateConnection on the connector itself
-        _settings = null!;
+        // The connector already exposes its settings via the public Settings property — pass them into
+        // the normal ctor rather than routing through a dummy ctor + reflection over the private field.
+        return new SqlUnitOfWork(connector, connector.Settings);
     }
 
     public async Task BeginAsync(CancellationToken ct = default)
@@ -65,9 +56,7 @@ public sealed class SqlUnitOfWork : IUnitOfWork<SqlTransactionContext>
         if (IsActive)
             throw new TransactionAlreadyActiveException();
 
-        _connection = _settings is not null
-            ? _connector.CreateConnection(_settings)
-            : _connector.CreateConnection(GetSettingsFromConnector());
+        _connection = _connector.CreateConnection(_settings);
 
         await _connection.OpenAsync(ct);
         _transaction = await _connection.BeginTransactionAsync(ct);
@@ -92,18 +81,6 @@ public sealed class SqlUnitOfWork : IUnitOfWork<SqlTransactionContext>
 
         await _transaction!.RollbackAsync(ct);
         await CleanupAsync();
-    }
-
-    /// <summary>
-    /// Extracts settings from the connector's protected field.
-    /// Used only by the FromStore factory method.
-    /// </summary>
-    private PasswordSettings GetSettingsFromConnector()
-    {
-        var field = typeof(AbstractConnectorBase)
-            .GetField("_settings", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        return (PasswordSettings)(field?.GetValue(_connector)
-            ?? throw new InvalidOperationException("Cannot access connector settings."));
     }
 
     private async Task CleanupAsync()

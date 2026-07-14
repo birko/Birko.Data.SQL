@@ -92,7 +92,14 @@ namespace Birko.Data.SQL
         public static string GetGeneratedQuery(DbCommand dbCommand)
         {
             var query = new StringBuilder(dbCommand.CommandText);
-            foreach (DbParameter parameter in dbCommand.Parameters)
+            // Replace longest parameter names first: names are suffixed with _{count}
+            // (GenerateParameterName), so @WHEREName0_5 is a prefix of @WHEREName0_50 and @LIMIT is a
+            // prefix of @LIMITxxx. A naive left-to-right Replace would corrupt the rendered SQL by
+            // substituting the shorter name inside the longer one. This string is diagnostic only
+            // (OnExecute log / InitException commandText), not executed.
+            foreach (DbParameter parameter in dbCommand.Parameters
+                .Cast<DbParameter>()
+                .OrderByDescending(p => p.ParameterName.Length))
             {
                 bool isString = _stringTypes.Contains(parameter.DbType);
                 string? value = isString
