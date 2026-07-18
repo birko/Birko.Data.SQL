@@ -636,7 +636,17 @@ namespace Birko.Data.SQL
                             }
 
                             var value = EvaluateExpression(memberExpression);
-                            parent.Values = (value != null && value is not string && value is IEnumerable enumerable)
+                            // A closure variable that evaluates to null must become IS NULL, exactly as a
+                            // literal `== null` does (see the ConstantExpression branch above). Otherwise
+                            // `x.Col == nullableVar` (var == null) emits `Col = NULL`, which is always
+                            // UNKNOWN in SQL → zero rows. For `!=`, IsNot is already set, so this yields
+                            // IS NOT NULL — symmetric with the literal-null path.
+                            if (value == null)
+                            {
+                                parent.Type = ConditionType.IsNull;
+                                return new[] { parent };
+                            }
+                            parent.Values = (value is not string && value is IEnumerable enumerable)
                                 ? (enumerable as object[] ?? enumerable.Cast<object>().ToArray())
                                 : new[] { value };
                             return new[] { parent };
