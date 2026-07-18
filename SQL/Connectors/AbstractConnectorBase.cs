@@ -232,7 +232,11 @@ namespace Birko.Data.SQL.Connectors
         /// <summary>
         /// Appends nested sub-conditions to <paramref name="sb"/> using the parent's IsOr flag
         /// as the join operator — no in-place mutation of sub.IsOr.
-        /// Wraps in parentheses when there are two or more children.
+        /// Wraps in parentheses when there are two or more children, or when the group is negated.
+        /// A negated group (parent IsNot, produced by <c>!(a &amp;&amp; b)</c> / <c>!(a || b)</c> or a
+        /// negated comparison that became a single-child group) is prefixed with <c>NOT</c> so the
+        /// negation binds the whole group — otherwise the flag would be silently dropped and the filter
+        /// would match the OPPOSITE rows.
         /// </summary>
         private void AppendSubConditionsTo(StringBuilder sb, Conditions.Condition condition, DbCommand command)
         {
@@ -245,10 +249,14 @@ namespace Birko.Data.SQL.Connectors
                 AppendConditionTo(sb, sub, command);
                 count++;
             }
-            if (count > 1)
+            if (count >= 1 && (count > 1 || condition.IsNot))
             {
                 sb.Insert(startIndex, '(');
                 sb.Append(')');
+            }
+            if (count >= 1 && condition.IsNot)
+            {
+                sb.Insert(startIndex, "NOT ");
             }
         }
 
