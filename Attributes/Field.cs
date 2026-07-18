@@ -111,4 +111,33 @@ namespace Birko.Data.SQL.Attributes
             this.IsUnique = IsUnique;
         }
     }
+
+    /// <summary>
+    /// Declares a named composite index at the CLASS level, listing the participating properties in column
+    /// order. Unlike per-property <see cref="IndexedField"/>, this can reference properties declared on a
+    /// base class (e.g. a shared tenant entity's TenantGuid) together with a property on the derived entity —
+    /// the only safe way to form a composite such as (TenantGuid, Number) when the discriminator lives on a
+    /// base type.
+    ///
+    /// <para>Inherited = false: the index is declared only on the annotated class, NOT propagated to every
+    /// subclass — that would collide on the database-global index name and mis-apply the constraint.
+    /// AllowMultiple = true: a class may declare several composite indexes.</para>
+    ///
+    /// <para>Set <see cref="IsUnique"/> for a composite UNIQUE constraint. As with <see cref="IndexedField"/>,
+    /// only a full (non-partial) unique index is emitted — partial/filtered unique indexes are not supported
+    /// (not portable across providers), so this fits always-populated columns.</para>
+    /// </summary>
+    [System.AttributeUsage(System.AttributeTargets.Class, Inherited = false, AllowMultiple = true)]
+    public class CompositeIndex : System.Attribute
+    {
+        public string Name { get; }
+        public string[] Properties { get; }
+        public bool IsUnique { get; set; }
+
+        public CompositeIndex(string name, params string[] properties)
+        {
+            Name = name;
+            Properties = properties ?? System.Array.Empty<string>();
+        }
+    }
 }

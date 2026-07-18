@@ -199,6 +199,67 @@ namespace Birko.Data.SQL
                 }
             }
 
+            // Class-level [CompositeIndex] — declares an index whose columns may be inherited from a base
+            // class (e.g. (TenantGuid, Number) where TenantGuid lives on a shared base type). Property names
+            // resolve against the same `fields` map (which already includes inherited properties), so
+            // [NamedField]/ModelMap column remaps are honoured automatically.
+            var compositeAttrs = new List<(string Name, string[] Properties, bool IsUnique)>();
+
+            // Direct cast (Inherited = false — do not walk base classes)
+            foreach (var attr in type.GetCustomAttributes(typeof(Attributes.CompositeIndex), false)
+                .OfType<Attributes.CompositeIndex>())
+            {
+                compositeAttrs.Add((attr.Name, attr.Properties, attr.IsUnique));
+            }
+
+            // Cross-assembly shared-project fallback (same attribute compiled into another assembly)
+            foreach (var attr in type.GetCustomAttributes(false)
+                .Where(a => a.GetType().FullName == "Birko.Data.SQL.Attributes.CompositeIndex"
+                         && !(a is Attributes.CompositeIndex)))
+            {
+                var attrType = attr.GetType();
+                var name = attrType.GetProperty("Name")?.GetValue(attr) as string;
+                var props = attrType.GetProperty("Properties")?.GetValue(attr) as string[];
+                var isUnique = attrType.GetProperty("IsUnique")?.GetValue(attr) is bool cu && cu;
+                if (!string.IsNullOrEmpty(name) && props != null)
+                {
+                    compositeAttrs.Add((name!, props, isUnique));
+                }
+            }
+
+            foreach (var (name, properties, isUnique) in compositeAttrs)
+            {
+                if (!indexes.TryGetValue(name, out var idx))
+                {
+                    idx = new IndexDefinition { Name = name };
+                    indexes[name] = idx;
+                }
+                if (isUnique)
+                {
+                    idx.Unique = true;
+                }
+
+                for (int i = 0; i < properties.Length; i++)
+                {
+                    var propName = properties[i];
+                    var field = fields.Values.FirstOrDefault(f => f.Property?.Name == propName);
+                    var columnName = field?.Name;
+                    if (string.IsNullOrEmpty(columnName))
+                    {
+                        // A typo must break at table-load, never silently drop the constraint.
+                        throw new Exceptions.TableAttributeException(
+                            $"CompositeIndex '{name}' on {type.FullName}: property '{propName}' is not a mapped column");
+                    }
+
+                    idx.Columns.Add(new IndexColumn
+                    {
+                        ColumnName = columnName,
+                        Order = i,
+                        IsDescending = false,
+                    });
+                }
+            }
+
             // Sort columns by Order within each index
             foreach (var idx in indexes.Values)
             {
