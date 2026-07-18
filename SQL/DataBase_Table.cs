@@ -152,11 +152,11 @@ namespace Birko.Data.SQL
                     .Where(a => a.GetType().FullName == "Birko.Data.SQL.Attributes.IndexedField"
                              && !(a is Attributes.IndexedField));
 
-                var allAttrs = new List<(string Name, int Order, bool IsDescending)>();
+                var allAttrs = new List<(string Name, int Order, bool IsDescending, bool IsUnique)>();
 
                 foreach (var attr in directAttrs)
                 {
-                    allAttrs.Add((attr.Name, attr.Order, attr.IsDescending));
+                    allAttrs.Add((attr.Name, attr.Order, attr.IsDescending, attr.IsUnique));
                 }
 
                 foreach (var attr in crossAttrs)
@@ -165,18 +165,25 @@ namespace Birko.Data.SQL
                     var name = attrType.GetProperty("Name")?.GetValue(attr) as string;
                     var order = attrType.GetProperty("Order")?.GetValue(attr) is int o ? o : 0;
                     var isDesc = attrType.GetProperty("IsDescending")?.GetValue(attr) is bool d && d;
+                    var isUnique = attrType.GetProperty("IsUnique")?.GetValue(attr) is bool u && u;
                     if (!string.IsNullOrEmpty(name))
                     {
-                        allAttrs.Add((name!, order, isDesc));
+                        allAttrs.Add((name!, order, isDesc, isUnique));
                     }
                 }
 
-                foreach (var (name, order, isDescending) in allAttrs)
+                foreach (var (name, order, isDescending, isUnique) in allAttrs)
                 {
                     if (!indexes.TryGetValue(name, out var idx))
                     {
                         idx = new IndexDefinition { Name = name };
                         indexes[name] = idx;
+                    }
+
+                    // Any contributing [IndexedField] marking the index unique makes the whole index unique.
+                    if (isUnique)
+                    {
+                        idx.Unique = true;
                     }
 
                     // Resolve actual column name from field metadata

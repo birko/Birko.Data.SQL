@@ -86,6 +86,14 @@ namespace Birko.Data.SQL.Attributes
     /// Multiple properties sharing the same index name form a composite index.
     /// Use Order to control column position within composite indexes.
     /// AllowMultiple — a single property can participate in multiple indexes.
+    ///
+    /// Set <see cref="IsUnique"/> on any contributing property to make the whole index UNIQUE
+    /// (a composite unique constraint, e.g. per-tenant uniqueness over (TenantGuid, Number)).
+    /// Note: only a full (non-partial) unique index is emitted. Partial/filtered unique indexes
+    /// (e.g. <c>WHERE Number &lt;&gt; ''</c> to allow multiple empty-string drafts) are NOT supported —
+    /// they are not portable across SQLite/PostgreSQL (partial), MSSQL (filtered), and MySQL (neither).
+    /// A composite unique index therefore fits columns that are always populated; columns left empty on
+    /// drafts must rely on an application-level guarded allocator instead.
     /// </summary>
     [System.AttributeUsage(System.AttributeTargets.Property, Inherited = true, AllowMultiple = true)]
     public class IndexedField : Field
@@ -93,12 +101,14 @@ namespace Birko.Data.SQL.Attributes
         public string Name { get; }
         public int Order { get; }
         public bool IsDescending { get; }
+        public bool IsUnique { get; }
 
-        public IndexedField(string name, int order = 0, bool isDescending = false)
+        public IndexedField(string name, int order = 0, bool isDescending = false, bool IsUnique = false)
         {
             Name = name;
             Order = order;
             IsDescending = isDescending;
+            this.IsUnique = IsUnique;
         }
     }
 }

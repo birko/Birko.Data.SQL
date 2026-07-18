@@ -302,7 +302,8 @@ namespace Birko.Data.SQL.Connectors
             var columns = string.Join(", ", index.Columns.Select(c =>
                 QuoteIdentifier(c.ColumnName) + (c.IsDescending ? " DESC" : "")));
 
-            return $"CREATE INDEX IF NOT EXISTS {QuoteIdentifier(index.Name)} ON {QuoteIdentifier(tableName)} ({columns})";
+            var unique = index.Unique ? "UNIQUE " : "";
+            return $"CREATE {unique}INDEX IF NOT EXISTS {QuoteIdentifier(index.Name)} ON {QuoteIdentifier(tableName)} ({columns})";
         }
 
         /// <summary>
