@@ -188,6 +188,35 @@ Enum properties are automatically mapped to `INTEGER` fields. `IntegerField` han
 ### IgnoreField Attribute
 Properties decorated with `[IgnoreField]` are skipped by `AbstractField.CreateAbstractField()` — they won't be included in table creation or any CRUD operations. Unsupported property types also return `null` instead of throwing `FieldAttributeException`.
 
+### Filter translation (`DataBase.ParseConditionExpression` / `ParseExpression`)
+The hand-rolled filter parsers run every predicate (Where / Delete / Update) and every value-position
+Update-SET expression through the shared `Birko.Data.Expressions.ExpressionNormalizer` (in
+`Birko.Data.Core`) at the lambda boundary first. The normalizer:
+- **funcletizes** any parameter-free subtree to a constant (so parameter-free ternary / `??` /
+  arithmetic and all closures collapse before parsing), and
+- **desugars** a boolean-typed ternary `c ? t : f` → `(c && t) || (!c && f)` and a boolean-typed
+  `a ?? b` → `(a == true) || (a == null && b)`, so `ParseConditionExpression` only ever sees
+  AND/OR/NOT/comparisons.
+
+On top of that, the SQL parsers themselves handle:
+- **Value-expression operand in a predicate** — column arithmetic (`x.A + x.B > 5`, `x.Price * 2 >= 10`,
+  `x.Total == x.A + x.B`, `x.Bonus % 2 == 0`), null-coalescing (`(x.Score ?? 0) > 5`) and a value-position
+  ternary compared to something (`(x.Vip ? x.Premium : x.Score) > 100` — i.e. **CASE in WHERE**). The
+  value side is rendered to a raw SQL fragment (`(A + B)`, `COALESCE(..)`, `CASE WHEN … END`, nullable
+  `.Value` unwrap) placed in `Condition.Name`; the operator flips when the value is on the left;
+  both-column comparisons use the `IsField` verbatim value. Because the WHERE builder binds parameters
+  only later (via the condition strategies), constants **inside a fragment** cannot be parameterised and
+  are inlined as portable SQL literals — numeric (invariant), `bool`→1/0, `enum`→integer, `string`
+  single-quoted with `'` escaped (`RenderValueFragment` / `RenderBoolFragment` / `InlineConstant`).
+  Non-portable literal types (DateTime, Guid, byte[]) and anything else it cannot faithfully translate
+  throw `NotSupportedException` rather than silently dropping the filter.
+- **Value-position** (`ParseExpression`, Update SET RHS) — `a ?? b` → `COALESCE(a, b)`,
+  `c ? t : f` → `CASE WHEN c THEN t ELSE f END`, and `x == null` / `x != null` → `IS [NOT] NULL`.
+
+Tests: `Birko.Data.Core.Tests.ExpressionNormalizerTests` (shared transform, semantic parity),
+`Birko.Data.SQL.SqLite.Tests.SqlPredicateNormalizationTests` (end-to-end Where/Delete/Update + value
+position vs a compiled-delegate oracle), alongside the existing `SqlExpressionParityTests`.
+
 ### Connector Property
 Always use `protected set` for the Connector property:
 ```csharp

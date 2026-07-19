@@ -123,10 +123,36 @@ namespace Birko.Data.SQL
                 if (expr is LambdaExpression lambdaExpression)
                 {
                     var type = lambdaExpression.Parameters?.FirstOrDefault()?.Type;
-                    return ParseExpression(lambdaExpression.Body, parameters, withTableName, type);
+                    var normalizedBody = Birko.Data.Expressions.ExpressionNormalizer.Normalize(lambdaExpression.Body) ?? lambdaExpression.Body;
+                    return ParseExpression(normalizedBody, parameters, withTableName, type);
+                }
+                else if (expr is ConditionalExpression conditionalExpression)
+                {
+                    // Value-position ternary (e.g. an Update SET right-hand side): render as CASE WHEN.
+                    var test = ParseExpression(conditionalExpression.Test, parameters, withTableName, exprType);
+                    var ifTrue = ParseExpression(conditionalExpression.IfTrue, parameters, withTableName, exprType);
+                    var ifFalse = ParseExpression(conditionalExpression.IfFalse, parameters, withTableName, exprType);
+                    return $"CASE WHEN {test} THEN {ifTrue} ELSE {ifFalse} END";
                 }
                 else if (expr is BinaryExpression binaryExpression)
                 {
+                    if (binaryExpression.NodeType == ExpressionType.Coalesce)
+                    {
+                        // Value-position null-coalescing (a ?? b) → COALESCE(a, b).
+                        var coalesceLeft = ParseExpression(binaryExpression.Left, parameters, withTableName, exprType);
+                        var coalesceRight = ParseExpression(binaryExpression.Right, parameters, withTableName, exprType);
+                        return $"COALESCE({coalesceLeft}, {coalesceRight})";
+                    }
+                    if (binaryExpression.NodeType is ExpressionType.Equal or ExpressionType.NotEqual
+                        && TryGetNullComparisonOperand(binaryExpression, out var nonNullOperand))
+                    {
+                        // `x IS NULL` / `x IS NOT NULL` — a null constant compared with `=`/`<>` is always
+                        // UNKNOWN in SQL, so it must become IS [NOT] NULL (matters for CASE WHEN tests above).
+                        var operand = ParseExpression(nonNullOperand!, parameters, withTableName, exprType);
+                        return binaryExpression.NodeType == ExpressionType.Equal
+                            ? $"({operand} IS NULL)"
+                            : $"({operand} IS NOT NULL)";
+                    }
                     var left = ParseExpression(binaryExpression.Left, parameters, withTableName, exprType);
                     var right = ParseExpression(binaryExpression.Right, parameters, withTableName, exprType);
                     StringBuilder result = new StringBuilder();
@@ -291,9 +317,13 @@ namespace Birko.Data.SQL
             {
                 if (expr is LambdaExpression lambdaExpression)
                 {
+                    var type = lambdaExpression.Parameters?.FirstOrDefault()?.Type;
+                    // Canonicalise the predicate once, at the lambda boundary: funcletize parameter-free
+                    // subtrees and desugar ternary / ?? into boolean algebra the parser below understands.
+                    var body = Birko.Data.Expressions.ExpressionNormalizer.Normalize(lambdaExpression.Body) ?? lambdaExpression.Body;
                     // Handle constant boolean body: _ => true means "no filter" (return empty),
                     // _ => false means "match nothing" (return impossible condition 1=0).
-                    if (lambdaExpression.Body is ConstantExpression constBody && constBody.Value is bool boolVal)
+                    if (body is ConstantExpression constBody && constBody.Value is bool boolVal)
                     {
                         if (boolVal)
                         {
@@ -309,8 +339,7 @@ namespace Birko.Data.SQL
                             return new[] { falseCondition };
                         }
                     }
-                    var type = lambdaExpression.Parameters?.FirstOrDefault()?.Type;
-                    var res = ParseConditionExpression(lambdaExpression.Body, parent, type);
+                    var res = ParseConditionExpression(body, parent, type);
                     return res;
                 }
                 else if (expr is UnaryExpression unaryExpression)
@@ -468,6 +497,27 @@ namespace Birko.Data.SQL
                                 }
                             }
                             catch { /* fall through to normal handling */ }
+                        }
+
+                        // Value-expression operand — column arithmetic (x.A + x.B > 5, x.Price * 2 >= 10),
+                        // null-coalescing ((x.Score ?? 0) > 5) or a value-position ternary
+                        // ((x.Vip ? x.Premium : x.Score) > 100, i.e. CASE in WHERE): render the value side(s)
+                        // to a raw SQL fragment and compare. Without this these nodes fall through the
+                        // comparison switch and are mis-parsed. (Boolean-typed ?:/?? were already desugared
+                        // to AND/OR by the normalizer and never reach here.)
+                        var valLeft = UnwrapConvert(binaryExpression.Left);
+                        var valRight = UnwrapConvert(binaryExpression.Right);
+                        if (IsValueExpressionOperand(valLeft) || IsValueExpressionOperand(valRight))
+                        {
+                            var valueCondition = BuildValueComparison(valLeft, valRight, conditionType, isNot, isOR, exprType);
+                            if (parent != null)
+                            {
+                                var valueSubs = parent.SubConditions as List<Condition> ?? new List<Condition>(parent.SubConditions ?? []);
+                                valueSubs.Add(valueCondition);
+                                parent.SubConditions = valueSubs;
+                                return new[] { parent };
+                            }
+                            return new[] { valueCondition };
                         }
 
                         var basecondition = new Conditions.Condition(null, null)
@@ -856,6 +906,243 @@ namespace Birko.Data.SQL
             if (ContainsParameter(expr)) return null;
             try { return EvaluateExpression(expr) as bool?; }
             catch { return null; }
+        }
+
+        /// <summary>Strips outer Convert / ConvertChecked wrappers (nullable lifting, boxing).</summary>
+        private static Expression UnwrapConvert(Expression expr)
+            => expr is UnaryExpression u && u.NodeType is ExpressionType.Convert or ExpressionType.ConvertChecked
+                ? UnwrapConvert(u.Operand)
+                : expr;
+
+        private static bool IsArithmeticNode(ExpressionType type)
+            => type is ExpressionType.Add or ExpressionType.AddChecked
+                or ExpressionType.Subtract or ExpressionType.SubtractChecked
+                or ExpressionType.Multiply or ExpressionType.MultiplyChecked
+                or ExpressionType.Divide or ExpressionType.Modulo;
+
+        private static bool IsNumericType(Type type)
+        {
+            type = Nullable.GetUnderlyingType(type) ?? type;
+            return Type.GetTypeCode(type) is TypeCode.Byte or TypeCode.SByte
+                or TypeCode.Int16 or TypeCode.UInt16 or TypeCode.Int32 or TypeCode.UInt32
+                or TypeCode.Int64 or TypeCode.UInt64 or TypeCode.Single or TypeCode.Double or TypeCode.Decimal;
+        }
+
+        /// <summary>True for a numeric arithmetic BinaryExpression (the column-arithmetic trigger).</summary>
+        private static bool IsArithmeticOperand(Expression expr)
+            => expr is BinaryExpression b && IsArithmeticNode(b.NodeType) && IsNumericType(b.Type);
+
+        /// <summary>
+        /// True when a comparison operand is a value-expression that must be rendered to a raw SQL
+        /// fragment: numeric arithmetic, null-coalescing, or a (value-position) ternary. Boolean-typed
+        /// ternary / coalesce are desugared to AND/OR by the normalizer and never reach here.
+        /// </summary>
+        private static bool IsValueExpressionOperand(Expression expr)
+            => IsArithmeticOperand(expr)
+                || (expr is BinaryExpression b && b.NodeType == ExpressionType.Coalesce)
+                || expr is ConditionalExpression;
+
+        private static Type UnwrapNullable(Type type) => Nullable.GetUnderlyingType(type) ?? type;
+
+        private static bool IsNullConstant(Expression expr)
+            => expr is ConstantExpression c && c.Value == null;
+
+        private static string? ComparisonSqlOperator(ExpressionType type) => type switch
+        {
+            ExpressionType.Equal => "=",
+            ExpressionType.NotEqual => "<>",
+            ExpressionType.LessThan => "<",
+            ExpressionType.LessThanOrEqual => "<=",
+            ExpressionType.GreaterThan => ">",
+            ExpressionType.GreaterThanOrEqual => ">=",
+            _ => null,
+        };
+
+        private static ConditionType FlipComparison(ConditionType type) => type switch
+        {
+            ConditionType.Less => ConditionType.Greather,
+            ConditionType.Greather => ConditionType.Less,
+            ConditionType.LessAndEqual => ConditionType.GreatherAndEqual,
+            ConditionType.GreatherAndEqual => ConditionType.LessAndEqual,
+            _ => type,
+        };
+
+        /// <summary>
+        /// Renders a value-expression subtree — column references, Add/Subtract/Multiply/Divide/Modulo
+        /// arithmetic, <c>COALESCE</c>, a value-position ternary (<c>CASE WHEN … END</c>), nullable
+        /// <c>.Value</c> unwrap, and constants — into a raw SQL fragment such as <c>(Table.A + Table.B)</c>
+        /// or <c>CASE WHEN (Table.Vip &lt;&gt; 0) THEN Table.Premium ELSE Table.Score END</c>. Because the
+        /// WHERE builder binds parameters only later (via the condition strategies), constants inside a
+        /// fragment cannot be parameterised and are instead inlined as portable SQL literals
+        /// (see <see cref="InlineConstant"/>). Throws <see cref="NotSupportedException"/> for anything it
+        /// cannot faithfully translate rather than silently dropping it.
+        /// </summary>
+        private static string RenderValueFragment(Expression expr, Type? exprType)
+        {
+            switch (expr)
+            {
+                case UnaryExpression u when u.NodeType is ExpressionType.Convert or ExpressionType.ConvertChecked:
+                    return RenderValueFragment(u.Operand, exprType);
+                case ConditionalExpression cond:
+                    return $"CASE WHEN {RenderBoolFragment(cond.Test, exprType)} "
+                        + $"THEN {RenderValueFragment(cond.IfTrue, exprType)} "
+                        + $"ELSE {RenderValueFragment(cond.IfFalse, exprType)} END";
+                case BinaryExpression b when IsArithmeticNode(b.NodeType):
+                {
+                    var l = RenderValueFragment(b.Left, exprType);
+                    var r = RenderValueFragment(b.Right, exprType);
+                    var op = b.NodeType switch
+                    {
+                        ExpressionType.Add or ExpressionType.AddChecked => "+",
+                        ExpressionType.Subtract or ExpressionType.SubtractChecked => "-",
+                        ExpressionType.Multiply or ExpressionType.MultiplyChecked => "*",
+                        ExpressionType.Divide => "/",
+                        ExpressionType.Modulo => "%",
+                        _ => throw new NotSupportedException($"Unsupported arithmetic operator {b.NodeType}"),
+                    };
+                    return $"({l} {op} {r})";
+                }
+                case BinaryExpression b when b.NodeType == ExpressionType.Coalesce:
+                    return $"COALESCE({RenderValueFragment(b.Left, exprType)}, {RenderValueFragment(b.Right, exprType)})";
+                case MemberExpression m when TryResolveParameterColumn(m, exprType, out var column):
+                    return column;
+                case MemberExpression valueMember when valueMember.Member.Name == "Value"
+                    && valueMember.Member.ReflectedType != null
+                    && Nullable.GetUnderlyingType(valueMember.Member.ReflectedType) != null
+                    && valueMember.Expression is MemberExpression innerNullable:
+                    return RenderValueFragment(innerNullable, exprType);
+                default:
+                    if (!ContainsParameter(expr))
+                        return InlineConstant(EvaluateExpression(expr));
+                    throw new NotSupportedException(
+                        $"Cannot translate operand '{expr}' inside a value-expression filter predicate to SQL.");
+            }
+        }
+
+        /// <summary>
+        /// Renders a boolean sub-expression — the test of a value-position ternary, i.e. a WHEN clause
+        /// of a CASE emitted in a WHERE — into a raw SQL predicate fragment with any constants inlined.
+        /// Supports comparisons, IS [NOT] NULL, AND/OR/NOT and bare boolean columns. Throws
+        /// <see cref="NotSupportedException"/> for constructs it cannot inline (e.g. string LIKE methods),
+        /// rather than silently dropping them.
+        /// </summary>
+        private static string RenderBoolFragment(Expression expr, Type? exprType)
+        {
+            expr = UnwrapConvert(expr);
+            switch (expr)
+            {
+                case UnaryExpression u when u.NodeType == ExpressionType.Not:
+                    return $"(NOT {RenderBoolFragment(u.Operand, exprType)})";
+                case BinaryExpression b when b.NodeType is ExpressionType.AndAlso or ExpressionType.And:
+                    return $"({RenderBoolFragment(b.Left, exprType)} AND {RenderBoolFragment(b.Right, exprType)})";
+                case BinaryExpression b when b.NodeType is ExpressionType.OrElse or ExpressionType.Or:
+                    return $"({RenderBoolFragment(b.Left, exprType)} OR {RenderBoolFragment(b.Right, exprType)})";
+                case BinaryExpression b when b.NodeType is ExpressionType.Equal or ExpressionType.NotEqual
+                        && (IsNullConstant(b.Left) || IsNullConstant(b.Right)):
+                {
+                    var operand = IsNullConstant(b.Right) ? b.Left : b.Right;
+                    var frag = RenderValueFragment(operand, exprType);
+                    return b.NodeType == ExpressionType.Equal ? $"({frag} IS NULL)" : $"({frag} IS NOT NULL)";
+                }
+                case BinaryExpression b when ComparisonSqlOperator(b.NodeType) is string op:
+                    return $"({RenderValueFragment(b.Left, exprType)} {op} {RenderValueFragment(b.Right, exprType)})";
+                case MemberExpression m when TryResolveParameterColumn(m, exprType, out var column)
+                        && UnwrapNullable(m.Type) == typeof(bool):
+                    return $"({column} <> 0)";
+                default:
+                    if (!ContainsParameter(expr) && EvaluateExpression(expr) is bool constBool)
+                        return constBool ? "(1=1)" : "(1=0)";
+                    throw new NotSupportedException(
+                        $"Cannot translate boolean sub-expression '{expr}' inside a CASE/WHERE predicate to SQL.");
+            }
+        }
+
+        /// <summary>
+        /// Inlines a constant into a portable SQL literal for use inside a raw fragment (CASE/COALESCE/
+        /// arithmetic in a WHERE, where parameters cannot be bound): NULL, numeric (invariant), bool → 1/0,
+        /// enum → integer, string → single-quoted with <c>'</c> escaped. Throws for types whose literal form
+        /// is not portable (DateTime, Guid, byte[]) so they fail loud instead of rendering wrong SQL.
+        /// </summary>
+        private static string InlineConstant(object? value)
+        {
+            switch (value)
+            {
+                case null:
+                    return "NULL";
+                case bool b:
+                    return b ? "1" : "0";
+                case string s:
+                    return "'" + s.Replace("'", "''") + "'";
+                case Enum e:
+                    return Convert.ToInt64(e, System.Globalization.CultureInfo.InvariantCulture)
+                        .ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
+            if (IsNumericType(value.GetType()))
+                return Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture)!;
+            throw new NotSupportedException(
+                $"Cannot inline a constant of type {value.GetType()} into a CASE/COALESCE/arithmetic SQL fragment.");
+        }
+
+        /// <summary>Resolves a direct parameter member access (or Convert(param).Member) to its column select name.</summary>
+        private static bool TryResolveParameterColumn(MemberExpression member, Type? exprType, out string column)
+        {
+            column = string.Empty;
+            if (exprType == null) return false;
+            var isParamAccess = member.Expression?.NodeType == ExpressionType.Parameter
+                || (member.Expression is UnaryExpression c
+                    && c.NodeType == ExpressionType.Convert
+                    && c.Operand.NodeType == ExpressionType.Parameter);
+            if (!isParamAccess) return false;
+            if (member.Member.ReflectedType?.IsAssignableFrom(exprType) != true) return false;
+            var name = ResolveColumnName(exprType, member.Member.Name, true);
+            if (string.IsNullOrEmpty(name)) return false;
+            column = name;
+            return true;
+        }
+
+        /// <summary>
+        /// Builds a <see cref="Condition"/> for a comparison in which at least one side is a value-expression
+        /// (arithmetic / COALESCE / CASE). The parameter/column side becomes the condition Name (raw SQL
+        /// fragment); a constant side becomes a bound value; when both sides reference the parameter the
+        /// right side is emitted verbatim (IsField). Flips the operator when the value is on the left.
+        /// </summary>
+        private static Condition BuildValueComparison(
+            Expression left, Expression right, ConditionType type, bool isNot, bool isOR, Type? exprType)
+        {
+            var leftHasParam = ContainsParameter(left);
+            var rightHasParam = ContainsParameter(right);
+
+            if (leftHasParam && !rightHasParam)
+            {
+                return MakeValueCondition(RenderValueFragment(left, exprType), EvaluateExpression(right), type, isNot, isOR);
+            }
+            if (!leftHasParam && rightHasParam)
+            {
+                // Value on the left, column expression on the right — flip the operator to keep the column on the left.
+                return MakeValueCondition(RenderValueFragment(right, exprType), EvaluateExpression(left), FlipComparison(type), isNot, isOR);
+            }
+            // Both sides reference the parameter → column expression compared to column expression.
+            var leftFragment = RenderValueFragment(left, exprType);
+            var rightFragment = RenderValueFragment(right, exprType);
+            return new Condition(leftFragment, new object[] { rightFragment }, type, isField: true, isNot: isNot, isOr: isOR);
+        }
+
+        private static Condition MakeValueCondition(string name, object? value, ConditionType type, bool isNot, bool isOR)
+        {
+            // A null-valued equality must become IS NULL (see the literal `== null` path); any other
+            // comparison keeps the (null) value bound so SQL yields UNKNOWN → no rows, matching C#.
+            if (value == null && type == ConditionType.Equal)
+                return new Condition(name, null, ConditionType.IsNull, false, isNot, isOR);
+            return new Condition(name, new[] { value! }, type, false, isNot, isOR);
+        }
+
+        /// <summary>True when one operand of an equality is the literal <c>null</c>; yields the other operand.</summary>
+        private static bool TryGetNullComparisonOperand(BinaryExpression binary, out Expression? nonNullOperand)
+        {
+            nonNullOperand = null;
+            if (IsNullConstant(binary.Right)) { nonNullOperand = binary.Left; return true; }
+            if (IsNullConstant(binary.Left)) { nonNullOperand = binary.Right; return true; }
+            return false;
         }
 
         private static object? EvaluateExpression(Expression expr)
