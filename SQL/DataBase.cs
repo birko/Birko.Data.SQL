@@ -610,6 +610,21 @@ namespace Birko.Data.SQL
                         {
                             foreach (var arg in methodExpression.Arguments)
                             {
+                                // Same class of problem as the string-pattern arguments above: an
+                                // overload-disambiguating argument that maps to no SQL operand must not
+                                // be fed to the parser. On .NET 9+ an ARRAY `set.Contains(x.Col)` binds
+                                // to MemoryExtensions.Contains(ReadOnlySpan<T>, T, IEqualityComparer<T>?)
+                                // whenever T is not IEquatable<T> — true for every enum and nullable
+                                // enum. That trailing `null` comparer took the constant-null path and
+                                // flipped the whole condition to IS NULL, so `statuses.Contains(x.Status)`
+                                // matched rows with a NULL column — none, silently. Guid/int/string sets
+                                // ARE IEquatable and bind the 2-argument overload, which is why the
+                                // canonical N+1 batch pattern never exposed it. Measured in a consumer
+                                // (Symbio TASK-249/TASK-254): 0 rows against 21 matching.
+                                if (IsNonOperandArgument(arg))
+                                {
+                                    continue;
+                                }
                                 ParseConditionExpression(arg, condition, exprType);
                             }
                         }
@@ -789,6 +804,36 @@ namespace Birko.Data.SQL
                 }
             }
             return Array.Empty<Condition>();
+        }
+
+        /// <summary>
+        /// True for method-call arguments that carry no SQL operand — equality/ordering comparers and
+        /// culture/comparison selectors. They exist only to pin down a CLR overload; handing one to the
+        /// condition parser corrupts the condition (a null comparer becomes IS NULL, a StringComparison
+        /// becomes the LIKE pattern). Note <see cref="IEqualityComparer{T}"/> does not implement the
+        /// non-generic <see cref="IEqualityComparer"/>, so both have to be checked.
+        /// <para>
+        /// A non-null comparer (e.g. <c>set.Contains(x.Name, StringComparer.OrdinalIgnoreCase)</c>) is
+        /// skipped too: its comparison SEMANTICS are delegated to the column's DB collation, exactly as
+        /// the <c>StringComparison</c> overloads of the string pattern methods already are. Honouring the
+        /// operand while ignoring the comparer is the closest correct translation available; the
+        /// alternative (parsing it as a value) produced a condition that matched the wrong rows.
+        /// </para>
+        /// </summary>
+        private static bool IsNonOperandArgument(Expression arg)
+        {
+            var type = arg.Type;
+            if (type == typeof(StringComparison) || type == typeof(System.Globalization.CultureInfo))
+                return true;
+            if (typeof(IEqualityComparer).IsAssignableFrom(type) || typeof(IComparer).IsAssignableFrom(type))
+                return true;
+            if (type.IsGenericType)
+            {
+                var definition = type.GetGenericTypeDefinition();
+                if (definition == typeof(IEqualityComparer<>) || definition == typeof(IComparer<>))
+                    return true;
+            }
+            return false;
         }
 
         /// <summary>

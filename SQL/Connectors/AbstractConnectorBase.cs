@@ -187,10 +187,47 @@ namespace Birko.Data.SQL.Connectors
         }
 
         /// <summary>
+        /// Converts a CLR value into the form the storage layer actually persists, before it is bound
+        /// to a <see cref="DbParameter"/>. Today that means one thing: unwrapping an enum to its
+        /// underlying integral value.
+        /// <para>
+        /// <see cref="Fields.AbstractField.CreateField"/> maps every enum property to an
+        /// <see cref="Fields.IntegerField"/>, so an enum column holds INTEGER. Enum EQUALITY never needed
+        /// help — the C# compiler lifts <c>x.Status == Foo</c> to the underlying integral type inside the
+        /// expression tree — but the members of a collection in <c>set.Contains(x.Status)</c>, and an enum
+        /// in an <c>UPDATE … SET</c>, reach the parameter still boxed as the enum, leaving each provider
+        /// to guess. Microsoft.Data.Sqlite happens to convert them; Npgsql rejects an unmapped CLR enum
+        /// outright. Binding the integral value the column actually stores removes the guess.
+        /// </para>
+        /// <para>
+        /// This is hardening, NOT the cause of the zero-rows defect that prompted it — that was
+        /// <c>DataBase.IsNonOperandArgument</c> (see Symbio TASK-249/TASK-254 and
+        /// <c>SqlEnumInPredicateTests</c>).
+        /// </para>
+        /// <para>
+        /// Every <c>AddParameter</c> override must funnel its value through here — the provider overrides
+        /// deliberately do not chain to this base implementation, so the conversion cannot live in the
+        /// body below.
+        /// </para>
+        /// </summary>
+        public static object? NormalizeParameterValue(object? value)
+        {
+            if (value == null) return null;
+            var type = value.GetType();
+            // Boxed nullable enums arrive already unwrapped to the underlying enum type.
+            if (!type.IsEnum) return value;
+            return System.Convert.ChangeType(
+                value,
+                Enum.GetUnderlyingType(type),
+                System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        /// <summary>
         /// Adds a parameter to a DbCommand.
         /// </summary>
         public virtual DbCommand AddParameter(DbCommand command, string name, object? value)
         {
+            value = NormalizeParameterValue(value);
             if (command.Parameters.Contains(name))
             {
                 command.Parameters[name].Value = value ?? DBNull.Value;
