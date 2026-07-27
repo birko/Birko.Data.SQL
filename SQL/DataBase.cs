@@ -670,8 +670,20 @@ namespace Birko.Data.SQL
                         {
                             parent.Values = materialized;
                         }
+                        else if (parent.Type == ConditionType.In)
+                        {
+                            // An empty (or all-null) collection in an IN predicate means "matches nothing" —
+                            // NOT "the column is null". Degrading to IsNull here returned rows with a NULL
+                            // column, which is a different, wrong answer. Keep the condition an In with no
+                            // values; InConditionStrategy renders that as the always-false / always-true
+                            // constant (an empty NOT IN matches everything). Note `Col IN (NULL)` is also
+                            // never true in SQL, so collapsing an all-null list to "matches nothing" is
+                            // faithful rather than a shortcut.
+                            parent.Values = System.Array.Empty<object>();
+                        }
                         else
                         {
+                            // Not an IN: a null/empty constant is a genuine `= null` → IS NULL.
                             parent.Type = ConditionType.IsNull;
                         }
                     }
