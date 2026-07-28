@@ -217,6 +217,51 @@ Tests: `Birko.Data.Core.Tests.ExpressionNormalizerTests` (shared transform, sema
 `Birko.Data.SQL.SqLite.Tests.SqlPredicateNormalizationTests` (end-to-end Where/Delete/Update + value
 position vs a compiled-delegate oracle), alongside the existing `SqlExpressionParityTests`.
 
+#### Empty `IN` renders a constant, not `IN ()`
+
+`InConditionStrategy` had no empty-set case and emitted `Col IN ()`. SQLite's grammar permits that (and
+evaluates it as always-false), which is why the SQLite-backed suites never saw it — PostgreSQL and MSSQL both
+reject it as a **syntax error**. An empty set now renders a constant with the same set semantics, valid on
+every dialect, needing no parameters and composing inside AND/OR chains exactly as a real `IN` would:
+
+| Predicate | Renders | Why |
+|-----------|---------|-----|
+| empty `IN` | `1 = 0` | nothing is a member of the empty set |
+| empty `NOT IN` | `1 = 1` | *everything* is "not in" the empty set — always-false here would silently invert the predicate |
+
+All four providers share the one strategy (registered in `AbstractConnectorBase.InitializeConditionStrategies`)
+and none override `IN` rendering, so this covers PostgreSQL/MSSQL/MySQL/SQLite. `ParseConditionExpression`
+matches: an empty materialized collection stays an `In` with no values (it used to degrade to
+`ConditionType.IsNull`, i.e. "rows whose column is NULL" — a different wrong answer); only a genuine `= null`
+maps to `IsNull`. An all-null list also collapses to "matches nothing", faithfully — `Col IN (NULL)` is never
+true. Tests: `Strategies/InConditionStrategyTests` (incl. single-value and all-null boundary cases guarding
+against an over-eager emptiness check).
+
+#### Overload-disambiguating arguments are not operands (`IsNonOperandArgument`)
+
+`enumSet.Contains(x.EnumColumn)` silently matched **zero rows**. On .NET 9+ an *array* `set.Contains(x.Col)`
+binds to `MemoryExtensions.Contains(ReadOnlySpan<T>, T, IEqualityComparer<T>?)` whenever `T` is not
+`IEquatable<T>` — true for every enum and nullable enum. The parser iterated *every* argument, so the trailing
+`null` comparer hit the constant-null branch and flipped the whole condition to `ConditionType.IsNull`.
+`Guid`/`int`/`string` **are** `IEquatable`, bind the 2-argument overload, and were never affected — which is
+why the canonical batch-query pattern never exposed it. Same defect family as the earlier
+`Title.Contains(query, StringComparison…)` bug.
+
+`DataBase.IsNonOperandArgument` now skips comparer / `StringComparison` / `CultureInfo` arguments. A **non-null**
+comparer is skipped too: its semantics delegate to the column collation, exactly as the `StringComparison`
+overloads already do.
+
+#### Enum parameter values bind as their underlying integer
+
+Enums persist as `INTEGER` (`IntegerField`), but a boxed enum reaching a provider parameter was left to that
+provider's own inference — `Microsoft.Data.Sqlite` converts it, **Npgsql rejects an unmapped CLR enum**.
+`AbstractConnectorBase.NormalizeParameterValue` unwraps enums to their underlying integral type; because the
+provider `AddParameter` overrides deliberately do **not** chain to the base implementation, each one
+(SQLite/PostgreSQL/MySQL/MSSQL) calls it directly. Covers enum values in `UPDATE … SET` as well as predicates.
+Tests: `Birko.Data.SQL.Tests/Connectors/EnumParameterBindingTests` (condition tree + bound parameter values),
+`Birko.Data.SQL.SqLite.Tests/SqlEnumInPredicateTests` (11 cases on a real SQLite file vs a compiled-delegate
+oracle).
+
 ### Connector Property
 Always use `protected set` for the Connector property:
 ```csharp

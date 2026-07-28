@@ -193,6 +193,18 @@ await store.UpdateAsync(x => x.Price > 100, item => { item.Price *= 0.9m; });
 
 `PropertyUpdate<T>` assignments are translated to SQL SET clauses via the connector's field resolution. The filter expression is converted to a WHERE clause via `DataBase.ParseConditionExpression()`.
 
+### Filter translation notes
+
+- **Empty membership sets are safe.** `ids.Contains(x.Id)` with an empty collection renders `1 = 0` (matches
+  nothing) and its negation renders `1 = 1` (matches everything) — never `IN ()`, which PostgreSQL and MSSQL
+  reject as a syntax error.
+- **Enum collections work.** `statuses.Contains(x.Status)` translates to a real `IN` on all providers; enum
+  parameters bind as their underlying integer, matching how enums are persisted (`INTEGER`).
+- **Culture/comparer arguments are ignored** as operands — `Title.Contains(q, StringComparison.OrdinalIgnoreCase)`
+  filters on `q` alone, with case-sensitivity delegated to the column collation.
+- Predicates also accept ternaries, `??`, and column arithmetic — see
+  [CLAUDE.md § Filter translation](CLAUDE.md) for the full supported surface.
+
 ## License
 
 Part of the Birko Framework.
