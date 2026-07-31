@@ -10,9 +10,12 @@ namespace Birko.Data.SQL.Connectors
     public abstract partial class AbstractConnector
     {
 
+        // TASK-110: the expression-keyed overloads pass the PROPERTY name, not a pre-resolved select name.
+        // Resolution happens once, in the Tables.Table funnel below, so there is a single place where an
+        // ORDER BY key is checked against real column metadata and a single place to keep correct.
         public IEnumerable<object> Select<T, P>(Type type, LambdaExpression? expr = null, IDictionary<Expression<Func<T, P>>, bool>? orderFields = null, int? limit = null, int? offset = null)
         {
-            foreach (var o in Select(type, (expr != null) ? DataBase.ParseConditionExpression(expr) : null, orderFields?.ToDictionary(x => DataBase.GetField(x.Key).GetSelectName(false), x => x.Value), limit, offset))
+            foreach (var o in Select(type, (expr != null) ? DataBase.ParseConditionExpression(expr) : null, orderFields?.ToDictionary(x => DataBase.GetField(x.Key).Property.Name, x => x.Value), limit, offset))
             {
                 yield return o;
             }
@@ -28,7 +31,7 @@ namespace Birko.Data.SQL.Connectors
 
         public IEnumerable<object> Select<T, P>(Type[] types, LambdaExpression? expr = null, IDictionary<Expression<Func<T, P>>, bool>? orderFields = null, int? limit = null, int? offset = null)
         {
-            foreach (var o in Select(types, (expr != null) ? DataBase.ParseConditionExpression(expr) : null, orderFields?.ToDictionary(x => DataBase.GetField(x.Key).GetSelectName(true), x => x.Value), limit, offset))
+            foreach (var o in Select(types, (expr != null) ? DataBase.ParseConditionExpression(expr) : null, orderFields?.ToDictionary(x => DataBase.GetField(x.Key).Property.Name, x => x.Value), limit, offset))
             {
                 yield return o;
             }
@@ -96,6 +99,11 @@ namespace Birko.Data.SQL.Connectors
                     i++;
                 }
             }
+
+            // TASK-110 (SH-H003 / SH-M022): the last layer that still has column metadata — the overload
+            // below takes bare table-name strings. Every read funnels through here, so resolving here is
+            // what makes the ORDER BY clause unreachable from caller-supplied text.
+            orderFields = DataBase.ResolveOrderFields(tables, orderFields);
 
             foreach (var item in Select(tables.Where(x => x != null).Select(x => x.Name), fields, transformFunction != null ? (reader) => transformFunction(fields, reader) : null, conditions, orderFields, limit, offset))
             {

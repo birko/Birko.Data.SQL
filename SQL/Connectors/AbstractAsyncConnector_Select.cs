@@ -12,9 +12,10 @@ namespace Birko.Data.SQL.Connectors
 {
     public abstract partial class AbstractAsyncConnector
     {
+        // TASK-110: property names in, resolution once in the Tables.Table funnel below — see the sync twin.
         public async IAsyncEnumerable<object> SelectAsync<T, P>(Type type, LambdaExpression? expr = null, IDictionary<Expression<Func<T, P>>, bool>? orderFields = null, int? limit = null, int? offset = null, [EnumeratorCancellation] CancellationToken ct = default)
         {
-            await foreach (var o in SelectAsync(type, (expr != null) ? DataBase.ParseConditionExpression(expr) : null, orderFields?.ToDictionary(x => DataBase.GetField(x.Key).GetSelectName(false), x => x.Value), limit, offset, ct))
+            await foreach (var o in SelectAsync(type, (expr != null) ? DataBase.ParseConditionExpression(expr) : null, orderFields?.ToDictionary(x => DataBase.GetField(x.Key).Property.Name, x => x.Value), limit, offset, ct))
             {
                 yield return o;
             }
@@ -30,7 +31,7 @@ namespace Birko.Data.SQL.Connectors
 
         public async IAsyncEnumerable<object> SelectAsync<T, P>(Type[] types, LambdaExpression? expr = null, IDictionary<Expression<Func<T, P>>, bool>? orderFields = null, int? limit = null, int? offset = null, [EnumeratorCancellation] CancellationToken ct = default)
         {
-            await foreach (var o in SelectAsync(types, (expr != null) ? DataBase.ParseConditionExpression(expr) : null, orderFields?.ToDictionary(x => DataBase.GetField(x.Key).GetSelectName(true), x => x.Value), limit, offset, ct))
+            await foreach (var o in SelectAsync(types, (expr != null) ? DataBase.ParseConditionExpression(expr) : null, orderFields?.ToDictionary(x => DataBase.GetField(x.Key).Property.Name, x => x.Value), limit, offset, ct))
             {
                 yield return o;
             }
@@ -98,6 +99,10 @@ namespace Birko.Data.SQL.Connectors
                     i++;
                 }
             }
+
+            // TASK-110 (SH-H003 / SH-M022): resolve here, the last layer holding column metadata — see the
+            // sync twin in AbstractConnector_Select.cs for why this is the single resolution point.
+            orderFields = DataBase.ResolveOrderFields(tables, orderFields);
 
             await foreach (var item in SelectAsync(tables.Where(x => x != null).Select(x => x.Name), fields, transformFunction != null ? async (reader) => await transformFunction(fields, reader) : null, conditions, orderFields, limit, offset, ct))
             {

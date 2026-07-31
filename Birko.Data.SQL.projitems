@@ -47,6 +47,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Connectors\Strategies\NullConditionStrategy.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\DataBase.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\DataBase_Field.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\DataBase_OrderBy.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\DataBase_Table.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Fields\AbstractField.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Fields\BooleanField.cs" />
