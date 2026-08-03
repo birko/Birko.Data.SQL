@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.Common;
@@ -381,6 +381,73 @@ namespace Birko.Data.SQL.Connectors
             var sql = ConditionDefinition(conditions, command);
             if (!string.IsNullOrEmpty(sql))
                 command.CommandText += " WHERE " + sql;
+            return command;
+        }
+
+        /// <summary>
+        /// True when <paramref name="conditions"/> carries nothing, so a destructive statement built from it
+        /// would target every row. Checked by the four destructive funnels **before** they enter
+        /// <c>DoCommandWithTransaction</c>.
+        /// </summary>
+        /// <remarks>
+        /// <para><b>Why a pre-check as well as <see cref="AddRequiredWhere"/>.</b> The transaction wrapper
+        /// funnels every exception from its command-building callback through <c>InitException</c>, which
+        /// re-wraps it in a bare <see cref="Exception"/> — so a refusal thrown from inside would reach the
+        /// caller as a generic exception that no <c>catch (WholeTableWriteException)</c> or
+        /// <c>catch (InvalidOperationException)</c> can select, i.e. an unhandled 500 for a request-shaped
+        /// problem. Refusing before the wrapper keeps the type intact, and avoids opening a connection and
+        /// beginning a transaction for a statement that will never run.</para>
+        /// <para>This tests the collection, which is sufficient for every reachable cause — a null filter, an
+        /// untranslatable predicate and a predicate reducing to <c>true</c> all produce a genuinely empty set.
+        /// <see cref="AddRequiredWhere"/> stays as the backstop for the exotic case of a non-empty collection
+        /// that renders to nothing.</para>
+        /// </remarks>
+        protected static bool WouldTargetEveryRow(IEnumerable<Conditions.Condition>? conditions)
+        {
+            if (conditions == null) return true;
+            // Enumerates rather than reading a Count — stops at the first element.
+            foreach (var _ in conditions) return false;
+            return true;
+        }
+
+        /// <summary>
+        /// Appends the <c>WHERE</c> clause for a <b>destructive</b> statement, throwing
+        /// <see cref="Data.Exceptions.WholeTableWriteException"/> when nothing would be appended.
+        /// </summary>
+        /// <remarks>
+        /// <para><b>SH-H002 — the guard is on the RENDERED clause, not on the condition collection.</b>
+        /// <see cref="ConditionDefinition(IEnumerable{Conditions.Condition}, DbCommand)"/> returns
+        /// <see cref="string.Empty"/> for a null <i>or</i> empty enumerable, and builds each term through
+        /// <c>BuildSingleCondition</c>, which can yield an empty string for a malformed condition — so a
+        /// non-empty collection can still produce no <c>WHERE</c>.</para>
+        /// <para>A separate method rather than a flag on <see cref="AddWhere"/> because reads share
+        /// <c>AddWhere</c> and a null filter on a read legitimately means read-everything.</para>
+        /// <para><paramref name="allowAllRows"/> is the explicit opt-in used by <c>DeleteAll</c> /
+        /// <c>UpdateAll</c> and by a caller-supplied <c>x =&gt; true</c>. It renders the conditionless
+        /// statement — clean SQL, no <c>1 = 1</c> marker, since that pattern is indistinguishable from
+        /// <c>' OR 1=1--</c> in a query log and would train operators to ignore a real attack signature.</para>
+        /// </remarks>
+        public virtual DbCommand? AddRequiredWhere(
+            IEnumerable<Conditions.Condition>? conditions,
+            DbCommand? command,
+            string operation,
+            string tableName,
+            bool allowAllRows = false)
+        {
+            if (command == null) return command;
+
+            var sql = ConditionDefinition(conditions, command);
+            if (!string.IsNullOrEmpty(sql))
+            {
+                command.CommandText += " WHERE " + sql;
+                return command;
+            }
+
+            if (!allowAllRows)
+            {
+                throw new Data.Exceptions.WholeTableWriteException(operation, tableName);
+            }
+
             return command;
         }
 

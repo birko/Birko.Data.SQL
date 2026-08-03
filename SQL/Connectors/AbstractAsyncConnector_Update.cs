@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
@@ -120,10 +120,16 @@ namespace Birko.Data.SQL.Connectors
             return UpdateAsync(tableName, fields, values, conditions, false, ct);
         }
 
-        public virtual async Task UpdateAsync(string tableName, IDictionary<int, string> fields, IDictionary<string, object> values, IEnumerable<Conditions.Condition>? conditions = null, bool isExpressionValues = false, CancellationToken ct = default)
+        public virtual async Task UpdateAsync(string tableName, IDictionary<int, string> fields, IDictionary<string, object> values, IEnumerable<Conditions.Condition>? conditions = null, bool isExpressionValues = false, CancellationToken ct = default, bool allowAllRows = false)
         {
             if (values != null && values.Any())
             {
+                // SH-H002 — refuse before the transaction wrapper; see AbstractConnector_Delete.
+                if (!allowAllRows && WouldTargetEveryRow(conditions))
+                {
+                    throw new Data.Exceptions.WholeTableWriteException("update", tableName);
+                }
+
                 await DoCommandWithTransactionAsync(async (command) =>
                 {
                     command.CommandText = "UPDATE " + QuoteIdentifier(tableName) + " SET ";
@@ -136,7 +142,7 @@ namespace Birko.Data.SQL.Connectors
                         command.CommandText += string.Join(", ", fields.Values.Select(x => x));
                     }
 
-                    AddWhere(conditions, command);
+                    AddRequiredWhere(conditions, command, "update", tableName, allowAllRows);
                     foreach (var kvp in values)
                     {
                         if (!isExpressionValues)

@@ -1,4 +1,4 @@
-using Birko.Data.SQL.Connectors;
+﻿using Birko.Data.SQL.Connectors;
 using Birko.Data.Stores;
 using Birko.Configuration;
 using System;
@@ -143,6 +143,8 @@ namespace Birko.Data.SQL.Stores
             Action<T> updateAction,
             CancellationToken ct = default)
         {
+            // SH-M023 — read-then-loop, invisible to the connector guard; see the sync overload.
+            RequireFilter(filter, "update");
             var items = (await ReadAsync(filter, null, null, null, ct)).ToList();
             foreach (var item in items)
             {
@@ -155,6 +157,53 @@ namespace Birko.Data.SQL.Stores
         public virtual async Task UpdateAsync(
             Expression<Func<T, bool>> filter,
             PropertyUpdate<T> updates,
+            CancellationToken ct = default)
+        {
+            RequireFilter(filter, "update");
+            await UpdateInternalAsync(filter, updates, SQL.DataBase.IsExplicitAllRows(filter as LambdaExpression), ct);
+        }
+
+        /// <inheritdoc cref="DataBaseBulkStore{DB, T}.UpdateAll(PropertyUpdate{T})"/>
+        public virtual Task UpdateAllAsync(PropertyUpdate<T> updates, CancellationToken ct = default)
+        {
+            return UpdateInternalAsync(null, updates, allowAllRows: true, ct);
+        }
+
+        /// <inheritdoc cref="DataBaseBulkStore{DB, T}.DeleteAll()"/>
+        public virtual async Task DeleteAllAsync(CancellationToken ct = default)
+        {
+            await EnsureInitializedAsync(ct).ConfigureAwait(false);
+            if (Connector == null) return;
+            if (AsyncConnector != null)
+                await AsyncConnector.DeleteAllAsync(typeof(T), ct);
+            else
+                await Task.Run(() => Connector!.DeleteAll(typeof(T)), ct);
+        }
+
+        /// <summary>
+        /// Guards the filter-based destructive overloads. A null filter is refused rather than treated as
+        /// "every row" — the parameter is already declared non-nullable, so this closes the gap between the
+        /// declaration and the behaviour (SH-M023).
+        /// </summary>
+        private static void RequireFilter(Expression<Func<T, bool>> filter, string operation)
+        {
+            if (filter == null)
+            {
+                throw new ArgumentNullException(
+                    nameof(filter),
+                    $"A filter is required to {operation} {typeof(T).Name}: a missing filter would affect every "
+                        + $"row. To target every row deliberately use {(operation == "delete" ? "DeleteAllAsync()" : "UpdateAllAsync(updates)")} "
+                        + "or an explicit `x => true` filter.");
+            }
+        }
+
+        /// <summary>
+        /// Shared body of the filter overload and <see cref="UpdateAllAsync"/>.
+        /// </summary>
+        private async Task UpdateInternalAsync(
+            Expression<Func<T, bool>>? filter,
+            PropertyUpdate<T> updates,
+            bool allowAllRows,
             CancellationToken ct = default)
         {
             await EnsureInitializedAsync(ct).ConfigureAwait(false);
@@ -173,9 +222,9 @@ namespace Birko.Data.SQL.Stores
             }
             var conditions = SQL.DataBase.ParseConditionExpression(filter as LambdaExpression);
             if (AsyncConnector != null)
-                await AsyncConnector.UpdateAsync(table.Name, fields, values, conditions, false, ct);
+                await AsyncConnector.UpdateAsync(table.Name, fields, values, conditions, false, ct, allowAllRows);
             else
-                await Task.Run(() => Connector!.Update(table.Name, fields, values, conditions), ct);
+                await Task.Run(() => Connector!.Update(table.Name, fields, values, conditions, false, allowAllRows), ct);
         }
 
         /// <inheritdoc />
@@ -205,6 +254,12 @@ namespace Birko.Data.SQL.Stores
             Expression<Func<T, bool>> filter,
             CancellationToken ct = default)
         {
+            RequireFilter(filter, "delete");
+            if (SQL.DataBase.IsExplicitAllRows(filter as LambdaExpression))
+            {
+                await DeleteAllAsync(ct);
+                return;
+            }
             await EnsureInitializedAsync(ct).ConfigureAwait(false);
             if (Connector == null) return;
             if (AsyncConnector != null)

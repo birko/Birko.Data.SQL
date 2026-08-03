@@ -1,4 +1,4 @@
-using Birko.Data.SQL.Connectors;
+﻿using Birko.Data.SQL.Connectors;
 using Birko.Data.Stores;
 using Birko.Configuration;
 using System;
@@ -101,6 +101,9 @@ namespace Birko.Data.SQL.Stores
         /// <inheritdoc />
         public virtual void Update(Expression<Func<T, bool>> filter, Action<T> updateAction)
         {
+            // SH-M023: read-then-loop, so no conditionless SQL is emitted and the connector guard cannot see
+            // this path — but a null filter still means Read(null) = every row, then mutate every one.
+            RequireFilter(filter, "update");
             var items = Read(filter, null, null, null).ToList();
             foreach (var item in items)
             {
@@ -111,6 +114,52 @@ namespace Birko.Data.SQL.Stores
 
         /// <inheritdoc />
         public virtual void Update(Expression<Func<T, bool>> filter, PropertyUpdate<T> updates)
+        {
+            RequireFilter(filter, "update");
+            UpdateInternal(filter, updates, SQL.DataBase.IsExplicitAllRows(filter as LambdaExpression));
+        }
+
+        /// <summary>
+        /// Updates EVERY row with <paramref name="updates"/> — the explicit all-rows door (SH-H002).
+        /// Equivalent to <c>Update(x =&gt; true, updates)</c>, and the recommended spelling.
+        /// </summary>
+        public virtual void UpdateAll(PropertyUpdate<T> updates)
+        {
+            UpdateInternal(null, updates, allowAllRows: true);
+        }
+
+        /// <summary>
+        /// Deletes EVERY row — the explicit all-rows door (SH-H002). Equivalent to
+        /// <c>Delete(x =&gt; true)</c>. Use <c>Destroy()</c> to drop the table instead of emptying it.
+        /// </summary>
+        public virtual void DeleteAll()
+        {
+            EnsureInitialized();
+            Connector?.DeleteAll(typeof(T));
+        }
+
+        /// <summary>
+        /// Guards the filter-based destructive overloads. A null filter is refused rather than treated as
+        /// "every row" — the parameter is already declared non-nullable, so this closes the gap between the
+        /// declaration and the behaviour (SH-M023).
+        /// </summary>
+        private static void RequireFilter(Expression<Func<T, bool>> filter, string operation)
+        {
+            if (filter == null)
+            {
+                throw new ArgumentNullException(
+                    nameof(filter),
+                    $"A filter is required to {operation} {typeof(T).Name}: a missing filter would affect every "
+                        + $"row. To target every row deliberately use {(operation == "delete" ? "DeleteAll()" : "UpdateAll(updates)")} "
+                        + "or an explicit `x => true` filter.");
+            }
+        }
+
+        /// <summary>
+        /// Shared body of the filter overload and <see cref="UpdateAll"/>. A null filter is only legal with
+        /// <paramref name="allowAllRows"/>; the public overload guards it first.
+        /// </summary>
+        private void UpdateInternal(Expression<Func<T, bool>>? filter, PropertyUpdate<T> updates, bool allowAllRows)
         {
             EnsureInitialized();
             if (Connector == null || updates.Assignments.Count == 0) return;
@@ -127,7 +176,7 @@ namespace Birko.Data.SQL.Stores
                 i++;
             }
             var conditions = SQL.DataBase.ParseConditionExpression(filter as LambdaExpression);
-            Connector.Update(table.Name, fields, values, conditions);
+            Connector.Update(table.Name, fields, values, conditions, false, allowAllRows);
         }
 
         /// <inheritdoc />
@@ -151,8 +200,14 @@ namespace Birko.Data.SQL.Stores
         /// <inheritdoc />
         public virtual void Delete(Expression<Func<T, bool>> filter)
         {
+            RequireFilter(filter, "delete");
             EnsureInitialized();
             if (Connector == null) return;
+            if (SQL.DataBase.IsExplicitAllRows(filter as LambdaExpression))
+            {
+                Connector.DeleteAll(typeof(T));
+                return;
+            }
             Connector.Delete(typeof(T), filter as LambdaExpression);
         }
 

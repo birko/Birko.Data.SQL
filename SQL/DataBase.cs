@@ -311,6 +311,32 @@ namespace Birko.Data.SQL
             return null;
         }
 
+        /// <summary>
+        /// True when the filter is an <b>explicit</b> "every row" predicate — the caller-facing synonym for
+        /// <c>DeleteAll()</c> / <c>UpdateAll(updates)</c> (SH-H002).
+        /// </summary>
+        /// <remarks>
+        /// <para>Deliberately a <b>one-node</b> test, not a catalogue of the shapes that mean everything.
+        /// <see cref="Birko.Data.Expressions.ExpressionNormalizer"/> funcletizes every parameter-free subtree
+        /// to a constant first, so <c>x =&gt; true</c>, <c>x =&gt; 1 == 1</c> and <c>x =&gt; capturedFlag</c>
+        /// all arrive here as the same <see cref="ConstantExpression"/>. Anything else — including
+        /// <c>x =&gt; true || x.A == 1</c>, which the parser also reduces to "everything" — is refused by the
+        /// connector guard instead, with a message naming the explicit API.</para>
+        /// <para>Enumerating the shapes was tried and rejected: the parser has at least four sites that
+        /// legitimately reduce to "everything", so a whitelist here would rot the moment a fifth is added, and
+        /// its failure mode is a refused destructive operation on working code.</para>
+        /// </remarks>
+        public static bool IsExplicitAllRows(LambdaExpression? expr)
+        {
+            if (expr == null)
+            {
+                return false;
+            }
+
+            var body = Birko.Data.Expressions.ExpressionNormalizer.Normalize(expr.Body) ?? expr.Body;
+            return body is ConstantExpression constant && constant.Value is bool value && value;
+        }
+
         public static IEnumerable<Conditions.Condition> ParseConditionExpression(Expression? expr = null, Conditions.Condition? parent = null, Type? exprType = null)
         {
             if (expr != null)

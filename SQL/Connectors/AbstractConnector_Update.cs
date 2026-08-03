@@ -114,10 +114,16 @@ namespace Birko.Data.SQL.Connectors
             Update(tableName, fields, values, conditions);
         }
 
-        public void Update(string tableName, IDictionary<int, string> fields, IDictionary<string, object> values, IEnumerable<Conditions.Condition>? conditions = null, bool isExpressionValues = false)
+        public void Update(string tableName, IDictionary<int, string> fields, IDictionary<string, object> values, IEnumerable<Conditions.Condition>? conditions = null, bool isExpressionValues = false, bool allowAllRows = false)
         {
             if (values != null && values.Any())
             {
+                // SH-H002 — refuse before the transaction wrapper; see AbstractConnector_Delete.
+                if (!allowAllRows && WouldTargetEveryRow(conditions))
+                {
+                    throw new Data.Exceptions.WholeTableWriteException("update", tableName);
+                }
+
                 DoCommandWithTransaction((command) => {
                     command.CommandText = "UPDATE " + QuoteIdentifier(tableName) + " SET ";
                     if (!isExpressionValues)
@@ -129,7 +135,7 @@ namespace Birko.Data.SQL.Connectors
                         command.CommandText += string.Join(", ", fields.Values.Select(x => x));
                     }
 
-                    AddWhere(conditions, command);
+                    AddRequiredWhere(conditions, command, "update", tableName, allowAllRows);
                     foreach (var kvp in values)
                     {
                         if (!isExpressionValues)

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
@@ -26,12 +26,24 @@ namespace Birko.Data.SQL.Connectors
             return DeleteAsyncAsync(tableName, conditions, ct);
         }
 
-        private async Task DeleteAsyncAsync(string tableName, IEnumerable<Conditions.Condition>? conditions = null, CancellationToken ct = default)
+        /// <inheritdoc cref="AbstractConnector.DeleteAll(Type)"/>
+        public Task DeleteAllAsync(Type type, CancellationToken ct = default)
         {
+            return DeleteAsyncAsync(DataBase.LoadTable(type).Name, conditions: null, ct, allowAllRows: true);
+        }
+
+        private async Task DeleteAsyncAsync(string tableName, IEnumerable<Conditions.Condition>? conditions = null, CancellationToken ct = default, bool allowAllRows = false)
+        {
+            // SH-H002 — refuse before the transaction wrapper; see AbstractConnector_Delete.
+            if (!allowAllRows && WouldTargetEveryRow(conditions))
+            {
+                throw new Data.Exceptions.WholeTableWriteException("delete", tableName);
+            }
+
             await DoCommandWithTransactionAsync(async (command) =>
             {
                 command.CommandText = "DELETE FROM " + QuoteIdentifier(tableName);
-                AddWhere(conditions, command);
+                AddRequiredWhere(conditions, command, "delete", tableName, allowAllRows);
                 await Task.CompletedTask;
             }, async (command) =>
             {
