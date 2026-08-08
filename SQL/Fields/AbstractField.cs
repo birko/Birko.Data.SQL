@@ -64,6 +64,14 @@ namespace Birko.Data.SQL.Fields
             if (property.GetCustomAttributes(typeof(System.ComponentModel.DataAnnotations.Schema.NotMappedAttribute), true).Any())
                 return null;
 
+            // An indexer (this[...]) is enumerated by GetProperties like any other public instance
+            // property, but it has no single value to store and Property.GetValue(obj, null) cannot even
+            // read it. It is structurally incapable of being a column, so it is skipped rather than
+            // reported: the unmapped-type throw below is about types the mapper does not cover yet, and
+            // firing it here would reject a model for something no mapping could ever fix.
+            if (property.GetIndexParameters().Length > 0)
+                return null;
+
             var isNullable = IsNullable(property.PropertyType);
             string name = property.Name;
             bool primary = false;
@@ -194,6 +202,39 @@ namespace Birko.Data.SQL.Fields
                         ? (AbstractField)new IntegerField(property, name, primary, unique, autoincrement)
                         : (AbstractField)new NullableIntegerField(property, name, primary, unique, autoincrement);
             }
+            if (property.PropertyType == typeof(long) || property.PropertyType == typeof(long?))
+            {
+                return (effectiveNotNull)
+                        ? (AbstractField)new LongField(property, name, primary, unique, autoincrement)
+                        : (AbstractField)new NullableLongField(property, name, primary, unique, autoincrement);
+            }
+            if (property.PropertyType == typeof(short) || property.PropertyType == typeof(short?))
+            {
+                return (effectiveNotNull)
+                        ? (AbstractField)new ShortField(property, name, primary, unique, autoincrement)
+                        : (AbstractField)new NullableShortField(property, name, primary, unique, autoincrement);
+            }
+            if (property.PropertyType == typeof(double) || property.PropertyType == typeof(double?))
+            {
+                return (effectiveNotNull)
+                        ? (AbstractField)new DoubleField(property, name, primary, unique)
+                        : (AbstractField)new NullableDoubleField(property, name, primary, unique);
+            }
+            if (property.PropertyType == typeof(float) || property.PropertyType == typeof(float?))
+            {
+                return (effectiveNotNull)
+                        ? (AbstractField)new FloatField(property, name, primary, unique)
+                        : (AbstractField)new NullableFloatField(property, name, primary, unique);
+            }
+            if (property.PropertyType == typeof(byte[]))
+            {
+                var binaryField = new BinaryField(property, name, primary, unique);
+                if (required)
+                {
+                    binaryField.IsNotNull = true;
+                }
+                return binaryField;
+            }
             if (property.PropertyType == typeof(char))
             {
                 return new CharField(property, name, primary, unique, 1);
@@ -231,8 +272,19 @@ namespace Birko.Data.SQL.Fields
                         : (AbstractField)new NullableIntegerField(property, name, primary, unique, autoincrement);
             }
 
-            // Unsupported type — skip (return null, filtered by LoadField)
-            return null;
+            // No arm matched. Historically this returned null and LoadField turned that into an empty
+            // field set, so the property got no column, was never written and was never read — silent
+            // write-side data loss with no exception and no log entry (SH-H037). That silence is the
+            // defect, not the missing arm: it means the NEXT unmapped type repeats the bug verbatim.
+            //
+            // Fail at table load instead, naming the property and its type. Silence is not a design; an
+            // opt-out is, and two already exist and are honoured at the top of this method —
+            // [IgnoreField] and [NotMapped].
+            throw new Exceptions.FieldAttributeException(
+                $"{property.DeclaringType?.FullName ?? property.ReflectedType?.FullName}.{property.Name}: "
+                + $"type '{property.PropertyType.FullName}' has no SQL column mapping. "
+                + "Map it to a supported type, or mark the property [IgnoreField] / [NotMapped] to exclude "
+                + "it from the table deliberately.");
         }
     }
 }

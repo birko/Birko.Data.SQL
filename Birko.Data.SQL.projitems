@@ -50,11 +50,16 @@
     <Compile Include="$(MSBuildThisFileDirectory)SQL\DataBase_OrderBy.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\DataBase_Table.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Fields\AbstractField.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Fields\BinaryField.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Fields\BooleanField.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Fields\DateTimeField.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Fields\DecimalField.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Fields\DoubleField.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Fields\FloatField.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Fields\GuidField.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Fields\IntegerField.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Fields\LongField.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Fields\ShortField.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Fields\CharField.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Fields\StringField.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Tables\Table.cs" />
