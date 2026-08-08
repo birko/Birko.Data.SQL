@@ -546,6 +546,31 @@ namespace Birko.Data.SQL
                             return new[] { valueCondition };
                         }
 
+                        // `x.Col.Date <op> <value>` — rewrite to a half-open range on the RAW column
+                        // instead of comparing DATE(col) against a bound DateTime. See
+                        // TryBuildDateTruncatedComparison for why the DATE() form silently matches
+                        // nothing. Only fires when exactly one side is a column `.Date` and the other
+                        // evaluates to a constant; column-vs-column keeps the old DATE() path.
+                        var dateRange = TryBuildDateTruncatedComparison(
+                            binaryExpression.Left, binaryExpression.Right, expr.NodeType, exprType);
+                        if (dateRange != null)
+                        {
+                            if (parent != null)
+                            {
+                                // Nest it rather than merging into the parent: the `!=` arm carries its
+                                // own IsOr=true, and ReturnSingleSubCondition would overwrite that with
+                                // the enclosing node's flag — turning `col < d OR col >= d+1` into an
+                                // unsatisfiable AND that matches zero rows. Same shape as the
+                                // value-comparison branch above.
+                                var dateSubs = parent.SubConditions as List<Condition>
+                                    ?? new List<Condition>(parent.SubConditions ?? []);
+                                dateSubs.Add(dateRange);
+                                parent.SubConditions = dateSubs;
+                                return new[] { parent };
+                            }
+                            return new[] { dateRange };
+                        }
+
                         var basecondition = new Conditions.Condition(null, null)
                         {
                             IsOr = isOR,
@@ -989,6 +1014,118 @@ namespace Birko.Data.SQL
             if (ContainsParameter(expr)) return null;
             try { return EvaluateExpression(expr) as bool?; }
             catch { return null; }
+        }
+
+        /// <summary>
+        /// True when <paramref name="expr"/> is a <c>.Date</c> truncation of a DateTime COLUMN
+        /// (<c>x.OpenedAt.Date</c>, or <c>x.Nullable.Value.Date</c>), yielding the inner column
+        /// expression. False for <c>local.Date</c> — that side has no lambda parameter and is a value.
+        /// </summary>
+        private static bool TryGetDateTruncatedColumn(Expression expr, out Expression inner)
+        {
+            inner = null!;
+            if (UnwrapConvert(expr) is not MemberExpression m) return false;
+            if (m.Member.Name != "Date" || m.Member.DeclaringType != typeof(DateTime)) return false;
+            if (m.Expression is not MemberExpression innerMember) return false;
+            if (!ContainsParameter(innerMember)) return false;
+            inner = innerMember;
+            return true;
+        }
+
+        /// <summary>
+        /// Rewrites <c>x.Col.Date &lt;op&gt; value</c> into a half-open range over the RAW column, e.g.
+        /// <c>x.OpenedAt.Date == d</c> becomes <c>OpenedAt &gt;= d AND OpenedAt &lt; d+1day</c>.
+        /// Returns null when the shape does not apply (column-vs-column, or neither side a column
+        /// <c>.Date</c>), leaving the older <c>DATE(col)</c> rendering in place for those.
+        /// <para>
+        /// Why this exists (Symbio TASK-355). The previous translation emitted <c>DATE(col) = @p</c> and
+        /// bound the right-hand side as a <b>DateTime</b>. On SQLite a DateTime column is stored as the
+        /// text <c>yyyy-MM-dd HH:mm:ss.FFFFFFF</c>, so <c>DATE(col)</c> evaluates to the 10-character
+        /// <c>yyyy-MM-dd</c> while the parameter serialises to the full <c>yyyy-MM-dd 00:00:00</c> —
+        /// <c>'2026-08-07' = '2026-08-07 00:00:00'</c> is <b>false for every row, always</b>. Measured
+        /// against the Symbio Testing DB: 0 rows matched where 4 should have. The query runs, returns
+        /// 200 and reports zero — the silent-wrong-answer shape, invisible to any test that runs against
+        /// an in-memory store because that COMPILES the lambda instead of translating it.
+        /// </para>
+        /// <para>
+        /// The range form fixes three things at once: it is correct (no text-vs-text formatting
+        /// mismatch), it is <b>sargable</b> (a function on the column defeats an index), and it is
+        /// dialect-agnostic — <c>DATE(x)</c> is not a function in T-SQL at all, so the old form was a
+        /// hard syntax error on MSSql, the same works-on-SQLite-only trap as the empty <c>IN ()</c>.
+        /// </para>
+        /// </summary>
+        private static Conditions.Condition? TryBuildDateTruncatedComparison(
+            Expression left, Expression right, ExpressionType nodeType, Type? exprType)
+        {
+            var leftIsCol = TryGetDateTruncatedColumn(left, out var leftInner);
+            var rightIsCol = TryGetDateTruncatedColumn(right, out var rightInner);
+            if (leftIsCol == rightIsCol) return null;   // both or neither — not this shape
+
+            var columnExpr = leftIsCol ? leftInner : rightInner;
+            var valueExpr = leftIsCol ? right : left;
+            if (ContainsParameter(valueExpr)) return null;
+
+            // Mirror the operator when the column is on the right (`value == x.Col.Date`).
+            var op = nodeType;
+            if (!leftIsCol)
+            {
+                op = op switch
+                {
+                    ExpressionType.LessThan => ExpressionType.GreaterThan,
+                    ExpressionType.LessThanOrEqual => ExpressionType.GreaterThanOrEqual,
+                    ExpressionType.GreaterThan => ExpressionType.LessThan,
+                    ExpressionType.GreaterThanOrEqual => ExpressionType.LessThanOrEqual,
+                    _ => op,   // Equal / NotEqual are symmetric
+                };
+            }
+
+            DateTime day;
+            try
+            {
+                if (EvaluateExpression(valueExpr) is not DateTime dt) return null;
+                day = dt.Date;
+            }
+            catch { return null; }
+            var next = day.AddDays(1);
+
+            // Resolve the column name through the normal machinery so table-name qualification,
+            // nullable unwrapping and [Column] mapping all behave exactly as they do elsewhere.
+            var probe = new Conditions.Condition(null, null);
+            ParseConditionExpression(columnExpr, probe, exprType);
+            if (string.IsNullOrEmpty(probe.Name)) return null;
+            var col = probe.Name!;
+
+            Conditions.Condition Leaf(DateTime v, ConditionType t)
+                => new Conditions.Condition(col, new object[] { v }, t);
+
+            return op switch
+            {
+                // date(col) == d  ⟺  d <= col < d+1
+                ExpressionType.Equal => new Conditions.Condition(null, null)
+                {
+                    IsOr = false,
+                    SubConditions = new List<Condition>
+                    {
+                        Leaf(day, ConditionType.GreatherAndEqual),
+                        Leaf(next, ConditionType.Less),
+                    },
+                },
+                // date(col) != d  ⟺  col < d OR col >= d+1
+                ExpressionType.NotEqual => new Conditions.Condition(null, null)
+                {
+                    IsOr = true,
+                    SubConditions = new List<Condition>
+                    {
+                        Leaf(day, ConditionType.Less),
+                        Leaf(next, ConditionType.GreatherAndEqual),
+                    },
+                },
+                ExpressionType.LessThan => Leaf(day, ConditionType.Less),                    // < d
+                ExpressionType.LessThanOrEqual => Leaf(next, ConditionType.Less),            // < d+1
+                ExpressionType.GreaterThan => Leaf(next, ConditionType.GreatherAndEqual),    // >= d+1
+                ExpressionType.GreaterThanOrEqual => Leaf(day, ConditionType.GreatherAndEqual), // >= d
+                _ => null,
+            };
         }
 
         /// <summary>Strips outer Convert / ConvertChecked wrappers (nullable lifting, boxing).</summary>
