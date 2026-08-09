@@ -184,7 +184,7 @@ namespace Birko.Data.SQL.Fields
                         : (AbstractField)new NullableDateTimeField(property, name, primary, unique);
             }
 
-            // SH-H038 / Symbio TASK-361 — TimeOnly was the one BCL value type with no arm here. While an
+            // SH-H037 (TASK-197) / Symbio TASK-361 — TimeOnly was one more BCL value type with no arm here. While an
             // unmapped type was silently skipped that only lost the column; once the fallthrough started
             // throwing, it took out every route on the owning entity, because the throw happens at table
             // load rather than on the query that touches the column. Stored as fixed-width HH:mm:ss text —

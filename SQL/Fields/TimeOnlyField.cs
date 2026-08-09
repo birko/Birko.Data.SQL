@@ -11,7 +11,7 @@ namespace Birko.Data.SQL.Fields
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Added for SH-H038 / Symbio TASK-361. <c>TimeOnly</c> was the one BCL value type
+    /// Added for SH-H037 (TASK-197) / Symbio TASK-361. <c>TimeOnly</c> was one more BCL value type
     /// <c>CreateAbstractField</c> had no arm for, which was harmless while an unmapped type was silently
     /// skipped, and became a hard failure the moment the mapper started throwing instead: the exception is
     /// raised at TABLE LOAD, so a single unmapped property makes <b>every</b> route on that entity return
