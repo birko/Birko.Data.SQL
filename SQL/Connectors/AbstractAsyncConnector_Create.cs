@@ -22,7 +22,29 @@ namespace Birko.Data.SQL.Connectors
                 await CreateTableAsync(tables.ToDictionary(x => x.Name, x => x.Fields.Select(y => y.Value)), ct);
                 foreach (var table in tables.Where(x => x.Indexes != null && x.Indexes.Count > 0))
                 {
-                    await CreateIndexesAsync(table.Name, table.Indexes!.Values, ct);
+                    // Async mirror of the sync path — see AbstractConnector_Create.cs for the full
+                    // reasoning. Short version: schema-ensure runs lazily on first data access, so an
+                    // exception here left the store permanently uninitialised and killed the entity's whole
+                    // surface over one unbuildable index. Recorded, not thrown; CreateIndexesAsync itself
+                    // still throws for direct callers.
+                    foreach (var index in table.Indexes!.Values)
+                    {
+                        try
+                        {
+                            await CreateIndexesAsync(table.Name, new[] { index }, ct);
+                            ClearIndexCreationFailure(table.Name, index?.Name);
+                        }
+                        // Cancellation is NOT an index failure — recording it would both mislabel the
+                        // failure and swallow the caller's cancellation.
+                        catch (OperationCanceledException)
+                        {
+                            throw;
+                        }
+                        catch (Exception ex)
+                        {
+                            RecordIndexCreationFailure(table.Name, index?.Name, ex);
+                        }
+                    }
                 }
             }
         }

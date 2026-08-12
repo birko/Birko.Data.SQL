@@ -182,6 +182,30 @@ public override void SetSettings(Settings settings)
 
 ## Important Notes
 
+### Index creation during schema-ensure (`CreateTable(IEnumerable<Tables.Table>)`)
+Schema-ensure creates declared indexes **one statement per index**, and an index it cannot build is
+**recorded, not thrown** — on `AbstractConnector.IndexCreationFailures`, with the `OnIndexCreationFailed`
+event for hosts that want to surface it at startup.
+
+Why: stores run schema-ensure **lazily** on first data access and set `_initialized` only *after* it
+returns, so an exception there left the store permanently uninitialised and re-threw on every later
+operation — including reads that never touched the indexed column. One duplicate pair under a UNIQUE index
+took down six entities' entire read surfaces in a consumer, with no way to even read the rows to repair
+them (TASK-204).
+
+- The public **`CreateIndexes` / `CreateIndexesAsync` still throw.** An explicit call — e.g.
+  `Birko.Data.Migrations.SQL`'s `SqlSchemaBuilder` — is a caller asking for that index *now*. Only
+  schema-ensure degrades.
+- `IndexCreationFailures` is **current state keyed by (table, index)**, not a log: one entry per index
+  however many times schema-ensure ran, the event fires on the transition into failure, and a successful
+  build clears the entry. This matters because connectors are cached process-wide per (type, settings id)
+  in `DataBase.GetConnector` while `_initialized` lives on the store — a scoped store per HTTP request
+  re-runs schema-ensure per request against one shared connector.
+- The **re-attempt on later runs is deliberate**: it is how the index appears once an operator repairs the
+  offending rows, with no restart. Don't "optimise" it into skipping known-failed indexes.
+- An empty `IndexCreationFailures` is **not** proof every declared index exists — an entity nothing has
+  touched yet has not attempted its indexes.
+
 ### Enum Support
 Enum properties are automatically mapped to `INTEGER` fields. `IntegerField` handles read/write conversion via `Enum.ToObject()` and `(int)` cast. Both non-nullable and nullable enums are supported.
 
