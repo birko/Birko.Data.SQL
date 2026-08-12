@@ -82,9 +82,12 @@ namespace Birko.Data.SQL
 
         /// <summary>
         /// Resolves one ORDER BY key against the given tables, or null when it matches nothing.
-        /// Property name first (what <see cref="Birko.Data.Stores.OrderBy{T}"/> produces), then the mapped
-        /// column name — a caller passing the column name directly worked before this guard existed and has
-        /// to keep working, and it is drawn from the same metadata, so it is equally safe.
+        /// <para>
+        /// The property-then-column lookup lives in <see cref="ResolveFieldNameIn"/>, shared with the rule
+        /// field sink (TASK-111) so the two identifier guards cannot drift apart. The view fallback below
+        /// stays here: it is keyed on the ORDER BY resolver's table list, and the rule path reaches
+        /// <see cref="ResolveFieldSelectName"/> through its own single entity type.
+        /// </para>
         /// </summary>
         private static string? ResolveOrderFieldName(IReadOnlyList<Tables.Table> tables, string key, bool withTableName)
         {
@@ -93,23 +96,10 @@ namespace Birko.Data.SQL
                 return null;
             }
 
-            foreach (var table in tables)
+            var resolved = ResolveFieldNameIn(tables, key, withTableName);
+            if (resolved != null)
             {
-                var field = table.GetFieldByPropertyName(key);
-                if (field != null)
-                {
-                    return field.GetSelectName(withTableName);
-                }
-            }
-
-            foreach (var table in tables)
-            {
-                var field = table.Fields?.Values
-                    .FirstOrDefault(f => f.Name.Equals(key, StringComparison.OrdinalIgnoreCase));
-                if (field != null)
-                {
-                    return field.GetSelectName(withTableName);
-                }
+                return resolved;
             }
 
             // Views register a resolver here, so a view column that no Table knows about still resolves.

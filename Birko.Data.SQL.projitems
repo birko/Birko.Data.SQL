@@ -48,6 +48,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)SQL\DataBase.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\DataBase_Field.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\DataBase_OrderBy.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\DataBase_RuleField.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\DataBase_Table.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Fields\AbstractField.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Fields\BinaryField.cs" />

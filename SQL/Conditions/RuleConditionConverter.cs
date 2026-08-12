@@ -8,46 +8,113 @@ namespace Birko.Data.SQL.Conditions;
 
 /// <summary>
 /// Converts Birko.Rules rule trees into Birko.Data.SQL Condition lists for dynamic SQL query building.
+/// <para>
+/// <b>SH-H023 (TASK-111).</b> Every overload here now checks <c>rule.Field</c> before it becomes a
+/// <see cref="Condition.Name"/>, because that name is interpolated straight into <c>CommandText</c> by
+/// every condition strategy. Prefer the overloads that take an entity type: they resolve the field against
+/// table metadata, so a <c>[NamedField]</c>-remapped property filters on the right column and no caller
+/// text can reach the statement. The type-less overloads have no metadata to resolve against and fall back
+/// to requiring a bare column identifier — enough to close the injection, not enough to fix a remapping.
+/// See <see cref="DataBase.ResolveRuleField"/> for the measured payloads.
+/// </para>
 /// </summary>
 public static class RuleConditionConverter
 {
     /// <summary>
-    /// Converts a single rule (leaf or group) into a list of SQL conditions.
+    /// Converts a single rule (leaf or group) into a list of SQL conditions, resolving each
+    /// <c>rule.Field</c> against <typeparamref name="T"/>'s table metadata.
     /// </summary>
-    public static IEnumerable<Condition> ToConditions(IRule rule)
+    /// <exception cref="ArgumentException">A rule's field names no column of <typeparamref name="T"/>.</exception>
+    public static IEnumerable<Condition> ToConditions<T>(IRule rule) => ToConditions(typeof(T), rule);
+
+    /// <summary>
+    /// Converts all rules in a RuleSet into SQL conditions (AND-joined), resolving each <c>rule.Field</c>
+    /// against <typeparamref name="T"/>'s table metadata.
+    /// </summary>
+    /// <exception cref="ArgumentException">A rule's field names no column of <typeparamref name="T"/>.</exception>
+    public static IEnumerable<Condition> ToConditions<T>(RuleSet ruleSet) => ToConditions(typeof(T), ruleSet);
+
+    /// <summary>
+    /// Converts a single rule (leaf or group) into a list of SQL conditions, resolving each
+    /// <c>rule.Field</c> against <paramref name="entityType"/>'s table metadata.
+    /// </summary>
+    /// <exception cref="ArgumentException">A rule's field names no column of the entity.</exception>
+    public static IEnumerable<Condition> ToConditions(Type entityType, IRule rule)
+    {
+        if (entityType == null)
+            throw new ArgumentNullException(nameof(entityType));
+
+        return Convert(rule, entityType);
+    }
+
+    /// <summary>
+    /// Converts all rules in a RuleSet into SQL conditions (AND-joined), resolving each <c>rule.Field</c>
+    /// against <paramref name="entityType"/>'s table metadata.
+    /// </summary>
+    /// <exception cref="ArgumentException">A rule's field names no column of the entity.</exception>
+    public static IEnumerable<Condition> ToConditions(Type entityType, RuleSet ruleSet)
+    {
+        if (entityType == null)
+            throw new ArgumentNullException(nameof(entityType));
+
+        return ConvertSet(ruleSet, entityType);
+    }
+
+    /// <summary>
+    /// Converts a single rule (leaf or group) into a list of SQL conditions.
+    /// <para>
+    /// Without an entity type the field cannot be resolved, so it must already be a bare column
+    /// identifier; anything else throws. Prefer <see cref="ToConditions{T}(IRule)"/>.
+    /// </para>
+    /// </summary>
+    /// <exception cref="ArgumentException">A rule's field is not a bare column identifier.</exception>
+    public static IEnumerable<Condition> ToConditions(IRule rule) => Convert(rule, entityType: null);
+
+    /// <summary>
+    /// Converts all rules in a RuleSet into SQL conditions (AND-joined).
+    /// <para>
+    /// Without an entity type the fields cannot be resolved, so each must already be a bare column
+    /// identifier; anything else throws. Prefer <see cref="ToConditions{T}(RuleSet)"/>.
+    /// </para>
+    /// </summary>
+    /// <exception cref="ArgumentException">A rule's field is not a bare column identifier.</exception>
+    public static IEnumerable<Condition> ToConditions(RuleSet ruleSet) => ConvertSet(ruleSet, entityType: null);
+
+    private static IEnumerable<Condition> Convert(IRule rule, Type? entityType)
     {
         if (!rule.IsEnabled)
             return [];
 
         return rule switch
         {
-            Rules.Rule leaf => [ConvertLeaf(leaf, isOr: false)],
-            RuleGroup group => ConvertGroup(group),
+            Rules.Rule leaf => [ConvertLeaf(leaf, isOr: false, entityType)],
+            RuleGroup group => ConvertGroup(group, entityType),
             _ => []
         };
     }
 
-    /// <summary>
-    /// Converts all rules in a RuleSet into SQL conditions (AND-joined).
-    /// </summary>
-    public static IEnumerable<Condition> ToConditions(RuleSet ruleSet)
+    private static IEnumerable<Condition> ConvertSet(RuleSet ruleSet, Type? entityType)
     {
         if (!ruleSet.IsEnabled)
             return [];
 
+        // Materialised, not lazy: the field guard must run when the caller asks for the conditions, not
+        // whenever the statement builder happens to enumerate them. A deferred throw surfaces from inside
+        // the connector, where it reads as a database fault rather than a bad rule.
         return ruleSet.Rules
             .Where(r => r.IsEnabled)
-            .SelectMany(ToConditions);
+            .SelectMany(r => Convert(r, entityType))
+            .ToList();
     }
 
-    private static IEnumerable<Condition> ConvertGroup(RuleGroup group)
+    private static IEnumerable<Condition> ConvertGroup(RuleGroup group, Type? entityType)
     {
         if (group.Rules.Count == 0)
             return [];
 
         var children = group.Rules
             .Where(r => r.IsEnabled)
-            .SelectMany(ToConditions)
+            .SelectMany(r => Convert(r, entityType))
             .ToList();
 
         if (children.Count == 0)
@@ -86,8 +153,16 @@ public static class RuleConditionConverter
         return conditions;
     }
 
-    private static Condition ConvertLeaf(Rules.Rule rule, bool isOr)
+    private static Condition ConvertLeaf(Rules.Rule rule, bool isOr, Type? entityType)
     {
+        // SH-H023 (TASK-111). The single place a rule.Field becomes a Condition.Name, and therefore the
+        // single place to check it — Condition.Name is interpolated raw by every strategy. With an entity
+        // type this resolves against table metadata (the resolution IS the whitelist, and it fixes
+        // [NamedField] remapping); without one it can only insist on a bare identifier.
+        var name = entityType != null
+            ? DataBase.ResolveRuleField(entityType, rule.Field)
+            : DataBase.ValidateRuleFieldIdentifier(rule.Field);
+
         var (condType, values) = MapOperator(rule);
         var isNot = rule.IsNegated;
 
@@ -113,12 +188,15 @@ public static class RuleConditionConverter
             isNot = !rule.IsNegated;
         }
 
+        // Dead today — the only call site passes isOr: false and SetOr applies OR-ness afterwards — but it
+        // carried the identical defect, so it takes the resolved name rather than being left as a trap for
+        // whoever revives it.
         if (isOr)
         {
-            return new Condition(rule.Field, values, condType, false, isNot, true);
+            return new Condition(name, values, condType, false, isNot, true);
         }
 
-        return new Condition(rule.Field, values, condType, false, isNot);
+        return new Condition(name, values, condType, false, isNot);
     }
 
     private static (ConditionType type, IEnumerable? values) MapOperator(Rules.Rule rule)
