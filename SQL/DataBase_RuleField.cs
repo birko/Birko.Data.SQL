@@ -50,13 +50,23 @@ namespace Birko.Data.SQL
         /// answered <i>no such column: Label</i>, so a remapped property could not be filtered at all.
         /// </para>
         /// <para>
-        /// Deliberately does NOT quote the resolved identifier, for the reason
+        /// Deliberately does NOT quote the resolved **column** identifier, for the reason
         /// <see cref="ResolveOrderFields"/> records for the ORDER BY sink: this codebase emits column
         /// identifiers bare everywhere and quotes only table names, so quoting here would break a working
-        /// filter on PostgreSQL, where an unquoted DDL identifier is folded to lower case. It resolves
-        /// table-qualified, matching what the expression path already emits for WHERE
+        /// filter on PostgreSQL, where an unquoted DDL identifier is folded to lower case.
+        /// </para>
+        /// <para>
+        /// It resolves **table-qualified**, matching what the expression path already emits for WHERE
         /// (<c>ResolveColumnName(exprType, name, withTableName: true)</c>) and closing the finding's
         /// "nothing qualifies the name, making it ambiguous in a join".
+        /// <b>Note the qualifier is a separate question from the column, and the PostgreSQL argument above
+        /// does not extend to it.</b> The emitted <c>Table.Column</c> leaves the table part unquoted while
+        /// <c>CreateSelectCommand</c> emits <c>FROM "Table"</c> quoted, so on PostgreSQL a table whose name
+        /// is not already lower case folds to lower case here and the statement fails with
+        /// <c>42P01 missing FROM-clause entry</c>. That is **pre-existing and framework-wide**, not
+        /// introduced here — the SELECT list qualifies identically via <c>GetSelectFields(true)</c>, so any
+        /// mixed-case table is already affected on every multi-column read. Tracked separately; this method
+        /// deliberately matches the surrounding convention rather than diverging from it in one sink.
         /// </para>
         /// </summary>
         /// <param name="entityType">The entity the rule filters; supplies the field metadata.</param>
@@ -143,8 +153,15 @@ namespace Birko.Data.SQL
         /// before either guard existed and has to keep working, and is drawn from the same metadata so it
         /// is equally safe). Shared so the two sinks cannot drift apart: they closed the same class of
         /// defect and a consumer should not have to learn two rules.
+        /// <para>
+        /// <c>internal</c>, not <c>private</c>: a third interpolated-identifier sink (a GROUP BY or HAVING
+        /// builder under <c>SQL/Connectors</c>, say) has to be able to *call* this, or it will rediscover
+        /// the lookup — which is precisely the outcome the § Conventions rule was written to prevent. It
+        /// stays internal rather than public because the two public entry points above are the supported
+        /// surface; a new sink lives in this assembly.
+        /// </para>
         /// </summary>
-        private static string? ResolveFieldNameIn(IReadOnlyList<Tables.Table> tables, string key, bool withTableName)
+        internal static string? ResolveFieldNameIn(IReadOnlyList<Tables.Table> tables, string key, bool withTableName)
         {
             if (string.IsNullOrWhiteSpace(key))
             {

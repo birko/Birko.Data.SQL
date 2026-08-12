@@ -43,6 +43,8 @@ public static class RuleConditionConverter
     {
         if (entityType == null)
             throw new ArgumentNullException(nameof(entityType));
+        if (rule == null)
+            throw new ArgumentNullException(nameof(rule));
 
         return Convert(rule, entityType);
     }
@@ -56,6 +58,8 @@ public static class RuleConditionConverter
     {
         if (entityType == null)
             throw new ArgumentNullException(nameof(entityType));
+        if (ruleSet == null)
+            throw new ArgumentNullException(nameof(ruleSet));
 
         return ConvertSet(ruleSet, entityType);
     }
@@ -68,7 +72,13 @@ public static class RuleConditionConverter
     /// </para>
     /// </summary>
     /// <exception cref="ArgumentException">A rule's field is not a bare column identifier.</exception>
-    public static IEnumerable<Condition> ToConditions(IRule rule) => Convert(rule, entityType: null);
+    public static IEnumerable<Condition> ToConditions(IRule rule)
+    {
+        if (rule == null)
+            throw new ArgumentNullException(nameof(rule));
+
+        return Convert(rule, entityType: null);
+    }
 
     /// <summary>
     /// Converts all rules in a RuleSet into SQL conditions (AND-joined).
@@ -78,7 +88,13 @@ public static class RuleConditionConverter
     /// </para>
     /// </summary>
     /// <exception cref="ArgumentException">A rule's field is not a bare column identifier.</exception>
-    public static IEnumerable<Condition> ToConditions(RuleSet ruleSet) => ConvertSet(ruleSet, entityType: null);
+    public static IEnumerable<Condition> ToConditions(RuleSet ruleSet)
+    {
+        if (ruleSet == null)
+            throw new ArgumentNullException(nameof(ruleSet));
+
+        return ConvertSet(ruleSet, entityType: null);
+    }
 
     private static IEnumerable<Condition> Convert(IRule rule, Type? entityType)
     {
