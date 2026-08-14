@@ -676,6 +676,34 @@ namespace Birko.Data.SQL
                                 {
                                     continue;
                                 }
+                                // TASK-213: the VALUE operand of a set `Contains` is a value expression, not a
+                                // nested predicate. Recursing into it made `set.Contains(x.Amount + 1)` take the
+                                // binary-comparison path, which fabricated a SUBcondition (`Amount = 1`) on this
+                                // very condition — and because the renderer branches on SubConditions before it
+                                // looks at Type, the `In` and its Values were then ignored entirely and only the
+                                // fabricated equality was emitted. Not a broken predicate: a DIFFERENT one, with
+                                // no exception and no log entry. Measured on SQLite,
+                                // `SomeIds.Contains(x.Amount + 1)` returned 1 row where the oracle says 0, and
+                                // the negated form 3 where it says 4.
+                                //
+                                // Resolved the same way a comparison resolves its column side
+                                // (see BuildValueComparison): the parameter-referencing operand becomes this
+                                // condition's Name as a raw SQL fragment. RenderValueFragment covers arithmetic,
+                                // COALESCE, CASE, `.Value` unwrap and inlined constants, and THROWS
+                                // NotSupportedException for anything it cannot faithfully translate — so an
+                                // operand this parser cannot express now fails loud instead of silently becoming
+                                // another predicate (§ SH-H037).
+                                //
+                                // Gated on "not a plain resolvable column" purely to leave every shape that works
+                                // today on its existing path, byte-for-byte. On a plain column the two agree
+                                // anyway: both resolve through ResolveColumnName(exprType, name, true).
+                                if (condition.Type == ConditionType.In
+                                    && ContainsParameter(arg)
+                                    && !IsPlainColumnOperand(arg, exprType))
+                                {
+                                    condition.Name = RenderValueFragment(arg, exprType);
+                                    continue;
+                                }
                                 ParseConditionExpression(arg, condition, exprType);
                             }
                         }
@@ -1302,6 +1330,16 @@ namespace Birko.Data.SQL
             throw new NotSupportedException(
                 $"Cannot inline a constant of type {value.GetType()} into a CASE/COALESCE/arithmetic SQL fragment.");
         }
+
+        /// <summary>
+        /// True when <paramref name="expr"/> is a direct column reference on the lambda parameter — the shape
+        /// the ordinary parser path already resolves correctly. Used by the set-<c>Contains</c> arm (TASK-213)
+        /// to leave every working operand on its existing path and route only the computed ones through
+        /// <see cref="RenderValueFragment"/>.
+        /// </summary>
+        private static bool IsPlainColumnOperand(Expression expr, Type? exprType)
+            => UnwrapConvert(expr) is MemberExpression member
+                && TryResolveParameterColumn(member, exprType, out _);
 
         /// <summary>Resolves a direct parameter member access (or Convert(param).Member) to its column select name.</summary>
         private static bool TryResolveParameterColumn(MemberExpression member, Type? exprType, out string column)
