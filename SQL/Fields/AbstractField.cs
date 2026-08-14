@@ -30,13 +30,28 @@ namespace Birko.Data.SQL.Fields
             Property = property;
         }
 
-        public string GetSelectName(bool withName = false)
+        /// <param name="quoteTable">
+        /// Quotes the <b>table</b> half of a qualified reference. Null keeps the historical bare form.
+        /// <para>
+        /// TASK-209. The qualifier and the <c>FROM</c> clause have to agree, and they did not: `FROM` quotes
+        /// the table (so it stays PascalCase on PostgreSQL) while this emitted <c>AvPersons.Name</c> bare, so
+        /// PostgreSQL folded the qualifier to <c>avpersons</c> and answered
+        /// <c>missing FROM-clause entry for table "avpersons"</c> — measured against PostgreSQL 16.4. The
+        /// <b>column</b> half stays bare, deliberately: base-table DDL emits column definitions bare, so every
+        /// base column is folded and a quoted column name would be a case-sensitive miss. The rule is
+        /// "quote tables, never quote columns" (§ Conventions), and this is the qualifier half of it.
+        /// </para>
+        /// </param>
+        public string GetSelectName(bool withName = false, Func<string, string>? quoteTable = null)
         {
+            var prefix = withName
+                ? (quoteTable != null ? quoteTable(Table.Name) : Table.Name) + "."
+                : string.Empty;
             return (IsAggregate)
                         ? string.Format("{0}({1})",
                             Name,
-                            string.Join(",", ((this as Fields.FunctionField)?.Parameters?.Select(x => string.Format("{0}{1}", (withName ? Table.Name + "." : string.Empty), x))) ?? new string[0]))
-                        : (withName ? Table.Name + "." : string.Empty) + Name;
+                            string.Join(",", ((this as Fields.FunctionField)?.Parameters?.Select(x => string.Format("{0}{1}", prefix, x))) ?? new string[0]))
+                        : prefix + Name;
         }
 
         public virtual object? Write(object value)

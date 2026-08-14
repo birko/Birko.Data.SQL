@@ -25,7 +25,11 @@ namespace Birko.Data.SQL.Tables
         /// both emitting produced <c>COUNT(VOrders.PersonId) as COUNT AS "OrderCount"</c>, two aliases on
         /// one column and a syntax error on every provider.
         /// </param>
-        public IDictionary<int, string> GetSelectFields(bool withName  = false, bool notAggregate = false, bool aggregateAlias = true)
+        /// <param name="quoteTable">
+        /// Quotes the table half of a qualified reference — see
+        /// <see cref="Birko.Data.SQL.Fields.AbstractField.GetSelectName"/> (TASK-209). Null keeps the bare form.
+        /// </param>
+        public IDictionary<int, string> GetSelectFields(bool withName  = false, bool notAggregate = false, bool aggregateAlias = true, Func<string, string>? quoteTable = null)
         {
             Dictionary<int, string> fields = new Dictionary<int, string>();
             var keys = Fields.Keys.ToArray();
@@ -34,7 +38,7 @@ namespace Birko.Data.SQL.Tables
                 var field = Fields[keys[i]];
                 if (!notAggregate || !field.IsAggregate)
                 {
-                    fields.Add(i, field.GetSelectName(withName)
+                    fields.Add(i, field.GetSelectName(withName, quoteTable)
                         + (field.IsAggregate && aggregateAlias ? " as " + AggregateAlias(field, keys[i]) : ""));
                 }
             }
