@@ -24,13 +24,36 @@ namespace Birko.Data.SQL.Connectors.Strategies
             // An EMPTY value set must not render as `Col IN ()`. That is a syntax error on PostgreSQL and
             // MSSQL; SQLite's grammar happens to permit it and treats it as always-false, so the defect is
             // invisible to a SQLite-only test environment while being a hard failure on two of the four
-            // supported providers. Emit a constant with the same SET SEMANTICS instead:
-            //   · empty IN     → matches nothing    → always false
-            //   · empty NOT IN → matches everything → always true (it must NOT silently invert)
-            // `1 = 0` / `1 = 1` are valid on every supported dialect and need no parameters, so the clause
-            // still composes inside AND/OR chains exactly as a real IN would.
-            if (IsEmpty(condition.Values))
-                return condition.IsNot ? "1 = 1" : "1 = 0";
+            // supported providers. The two halves are NOT symmetric:
+            //   · empty IN     → matches nothing    → always false → rendered as the `1 = 0` constant
+            //   · empty NOT IN → matches everything → reduced away by the caller, never rendered
+            //
+            // TASK-137: the always-true half used to render `1 = 1`, and that was wrong twice over. `1 = 1` is
+            // the signature of `' OR 1=1--`, so emitting it during normal operation trains operators to scroll
+            // past the pattern they are supposed to react to — and, far worse, it is a non-empty WHERE that
+            // constrains nothing, so it satisfied AddRequiredWhere's whole-table guard. Measured before the
+            // fix: `Delete(x => !empty.Contains(x.Col))` left 0 of 3 rows and threw nothing.
+            //
+            // An always-true term has no rendering here BY DESIGN — `A AND TRUE` is `A`, so
+            // AbstractConnectorBase.IsAlwaysTrueCondition reduces it away one layer up, where the surrounding
+            // AND/OR context (and the negation of an enclosing group) is known. This throws rather than
+            // returning a constant or an empty string: a tautology is the defect, and an empty string would be
+            // silently swallowed by a chain that then joins two separators together. Nothing in the framework
+            // reaches it — ConditionDefinition skips such terms before BuildSingleCondition is called.
+            if (!HasAnyValue(condition.Values))
+            {
+                if (!condition.IsNot)
+                    return Connectors.AbstractConnectorBase.AlwaysFalseSql;
+
+                throw new InvalidOperationException(
+                    $"An empty NOT IN on '{condition.Name}' matches every row and has no SQL rendering: "
+                        + "it must be reduced away by the enclosing chain, which "
+                        + $"{nameof(Connectors.AbstractConnectorBase)}."
+                        + $"{nameof(Connectors.AbstractConnectorBase.IsAlwaysTrueCondition)} exists to detect. "
+                        + "Render the condition tree through ConditionDefinition rather than calling this "
+                        + "strategy directly. (TASK-137: it previously rendered `1 = 1`, which satisfied the "
+                        + "whole-table write guard with a tautology.)");
+            }
 
             var op = condition.IsNot ? " NOT IN " : " IN ";
             var inClause = BuildInClause(condition, command, context);
@@ -39,14 +62,14 @@ namespace Birko.Data.SQL.Connectors.Strategies
         }
 
         /// <summary>
-        /// True when the condition carries no values at all. `Values` is a non-generic IEnumerable, so this
+        /// True when the condition carries at least one value. `Values` is a non-generic IEnumerable, so this
         /// enumerates rather than reading a Count — it stops at the first element.
         /// </summary>
-        private static bool IsEmpty(System.Collections.IEnumerable? values)
+        private static bool HasAnyValue(System.Collections.IEnumerable? values)
         {
-            if (values == null) return true;
-            foreach (var _ in values) return false;
-            return true;
+            if (values == null) return false;
+            foreach (var _ in values) return true;
+            return false;
         }
 
         private string BuildInClause(Conditions.Condition condition, DbCommand command, SqlBuilderContext context)
