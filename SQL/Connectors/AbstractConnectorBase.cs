@@ -597,7 +597,7 @@ namespace Birko.Data.SQL.Connectors
             var sql = ConditionDefinition(conditions, command);
             if (!string.IsNullOrEmpty(sql))
             {
-                command.CommandText += " WHERE " + sql;
+                command.CommandText += " WHERE " + StripTargetTableQualifier(sql, tableName);
                 return command;
             }
 
@@ -607,6 +607,50 @@ namespace Birko.Data.SQL.Connectors
             }
 
             return command;
+        }
+
+        /// <summary>
+        /// Removes the target table's qualifier from a rendered write clause, so
+        /// <c>WHERE Widgets.Name = @p</c> becomes <c>WHERE Name = @p</c>.
+        /// <para>
+        /// TASK-216, the write half of TASK-211. <c>DataBase.ResolveColumnName(…, withTableName: true)</c>
+        /// qualifies every condition name, and a write quotes its target table — so on PostgreSQL, the one
+        /// supported provider that case-folds an unquoted identifier, the bare qualifier folds and matches
+        /// nothing. Measured on 16.4: <c>DELETE FROM "FwPeople" WHERE FwPeople.Name = $1</c> →
+        /// <c>ERROR: missing FROM-clause entry for table "fwpeople"</c>, i.e. every filtered
+        /// <c>Delete</c>/<c>Update</c> on a PascalCase entity failed.
+        /// </para>
+        /// <para>
+        /// <b>Stripped rather than quoted, and stripped rather than aliased.</b> A write targets exactly one
+        /// table, so a qualifier carries no information there and a bare column cannot be ambiguous.
+        /// Quoting it would make the write path the only place a *qualifier* is quoted, while a read
+        /// resolves its qualifiers against a **bare alias** (<see cref="SelectTableReference"/>) — two
+        /// conventions for one thing, which is the shape this family of defects keeps arriving in. The
+        /// alias itself does not port: MSSql rejects <c>DELETE FROM t AS a</c>. Stripping keeps one
+        /// invariant — <i>a qualifier is only ever emitted where a bare alias introduces it</i> — and is
+        /// provider-independent.
+        /// </para>
+        /// <para>
+        /// Text-level on purpose. The qualifier can arrive <b>function-wrapped</b> — <c>LOWER(T.Col)</c>,
+        /// <c>COALESCE(T.A, T.B)</c>, and the <c>.Date</c> rewrite's <c>(T.Seen &gt;= @a AND T.Seen &lt; @b)</c>
+        /// — all measured on the same server, so rewriting condition names one at a time would miss exactly
+        /// the shapes a partial fix always misses. Operating on the rendered clause also means the caller's
+        /// <c>Condition</c> objects are never mutated (CR-M168 / TASK-113: this file has been bitten three
+        /// times by writing to a caller-owned object).
+        /// </para>
+        /// <para>
+        /// Safe against parameter names: <c>SqlBuilderContext.GenerateParameterName</c> sanitizes with
+        /// <c>[^a-zA-Z0-9_]</c>, so a parameter built from <c>Widgets.Name</c> is <c>@WHEREWidgetsName0_0</c>
+        /// and contains no <c>Widgets.</c> to strip. The left-edge guard stops a *different* table whose name
+        /// ends with the target's from being corrupted — with target <c>Person</c>, <c>MyPerson.Col</c> must
+        /// not become <c>MyCol</c>.
+        /// </para>
+        /// </summary>
+        protected virtual string StripTargetTableQualifier(string sql, string? tableName)
+        {
+            if (string.IsNullOrEmpty(sql) || string.IsNullOrEmpty(tableName)) return sql;
+            var pattern = @"(?<![A-Za-z0-9_.""])" + System.Text.RegularExpressions.Regex.Escape(tableName!) + @"\.";
+            return System.Text.RegularExpressions.Regex.Replace(sql, pattern, string.Empty);
         }
 
         /// <summary>
