@@ -759,8 +759,12 @@ namespace Birko.Data.SQL.Connectors
         /// </summary>
         protected virtual string SelectTableReference(string table)
         {
+            // The alias is emitted BARE and unescaped, so it is gated on a strict identifier pattern —
+            // anything else gets the quoted name only. That is what keeps § Conventions' rule that an
+            // identifier reaching interpolated SQL is never caller text validated loosely: a name that is
+            // not a plain identifier cannot reach the statement unquoted.
             var quoted = QuoteIdentifier(table);
-            return PlainTableIdentifier.IsMatch(table ?? string.Empty)
+            return PlainTableIdentifier.IsMatch(table)
                 ? quoted + " AS " + table
                 : quoted;
         }
