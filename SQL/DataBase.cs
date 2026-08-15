@@ -325,17 +325,16 @@ namespace Birko.Data.SQL
         /// <para>Enumerating the shapes was tried and rejected: the parser has at least four sites that
         /// legitimately reduce to "everything", so a whitelist here would rot the moment a fifth is added, and
         /// its failure mode is a refused destructive operation on working code.</para>
+        /// <para><b>The test itself lives in
+        /// <see cref="Birko.Data.Expressions.PredicateScope.IsExplicitAllRows"/></b> and this method forwards
+        /// to it. TASK-212 needed the same question answered from <c>Birko.Data.Stores</c>, which cannot see
+        /// this class, and briefly had a second identical copy — two definitions of "the caller explicitly
+        /// asked for every row", both feeding destructive guards, free to drift apart in exactly the way
+        /// § Conventions' one-producer rule describes. This overload is kept because it is public API and
+        /// reads naturally beside the rest of the SQL filter surface.</para>
         /// </remarks>
         public static bool IsExplicitAllRows(LambdaExpression? expr)
-        {
-            if (expr == null)
-            {
-                return false;
-            }
-
-            var body = Birko.Data.Expressions.ExpressionNormalizer.Normalize(expr.Body) ?? expr.Body;
-            return body is ConstantExpression constant && constant.Value is bool value && value;
-        }
+            => Birko.Data.Expressions.PredicateScope.IsExplicitAllRows(expr);
 
         public static IEnumerable<Conditions.Condition> ParseConditionExpression(Expression? expr = null, Conditions.Condition? parent = null, Type? exprType = null)
         {
