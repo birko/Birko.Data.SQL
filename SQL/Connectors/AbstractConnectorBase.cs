@@ -712,6 +712,60 @@ namespace Birko.Data.SQL.Connectors
         }
 
         /// <summary>
+        /// A table name that can carry a bare SQL alias: a plain identifier, nothing needing quotes.
+        /// Anchored <c>\A…\z</c> rather than <c>^…$</c> because .NET's <c>$</c> also matches before a
+        /// trailing newline (the same anchoring rule as <c>ValidateRuleFieldIdentifier</c>).
+        /// </summary>
+        private static readonly System.Text.RegularExpressions.Regex PlainTableIdentifier =
+            new(@"\A[A-Za-z_][A-Za-z0-9_]*\z", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+        /// <summary>
+        /// The token a SELECT's <c>FROM</c> / <c>JOIN</c> emits for a table: the <b>quoted</b> table name
+        /// followed by a <b>bare</b> alias equal to that name.
+        /// <para>
+        /// TASK-211. Every read this connector builds qualifies its columns — <c>Table.Column</c> from
+        /// <see cref="Birko.Data.SQL.Tables.Table.GetSelectFields"/> for the projection, from
+        /// <c>DataBase.ResolveColumnName(…, withTableName: true)</c> for the <c>WHERE</c>, and the same
+        /// again for <c>GROUP BY</c>, <c>ORDER BY</c> and a join's <c>ON</c>. Those qualifiers are emitted
+        /// bare, while the <c>FROM</c> quoted its table — and on PostgreSQL, the one supported provider that
+        /// case-folds an unquoted identifier, a bare <c>OfPersons</c> folds to <c>ofpersons</c> and does not
+        /// match the quoted relation. Measured on 16.4: <c>SELECT OfPersons.Name FROM "OfPersons"</c> →
+        /// <c>ERROR: missing FROM-clause entry for table "ofpersons"</c>, which this layer then swallowed
+        /// into an empty result. So <b>every read of every PascalCase-named entity returned zero rows</b>,
+        /// silently — reads, not just the views the defect was filed against.
+        /// </para>
+        /// <para>
+        /// The alias is what makes the fix total. Quoting each qualifier instead would mean teaching every
+        /// producer of a qualified name — including the ones that wrap it, <c>LOWER(T.Col)</c>,
+        /// <c>COALESCE</c>, the <c>.Date</c> rewrite — and a producer missed is the identical silent empty
+        /// result, which is precisely how this survived. Aliasing is one site and correct by construction:
+        /// the alias folds exactly as the qualifiers do. It also keeps
+        /// <c>DataBase.ParseConditionExpression</c> provider-independent, which the alternative would not.
+        /// </para>
+        /// <para>
+        /// Quoting the alias would defeat it — a quoted alias is case-sensitive again and the bare
+        /// qualifiers would stop matching. That is consistent with, not a departure from, § Conventions'
+        /// <i>quote tables, never quote columns</i>: the relation is still addressed quoted, and the alias
+        /// is the bare name every column reference already resolves against.
+        /// </para>
+        /// <para>
+        /// A name that cannot take a bare alias (quoted-only: spaces, punctuation, a reserved word) is
+        /// emitted unaliased, exactly as before. That is not a gap — such a table already cannot be read
+        /// through a qualified SELECT on any provider (measured on PostgreSQL: <c>SELECT Order.Guid FROM
+        /// "Order"</c> is <c>syntax error at or near "."</c> with or without an alias) — and it keeps the
+        /// change away from the one shape it is not about, an unqualified <c>SELECT COUNT(*)</c>, which
+        /// works today for such a table and must keep working.
+        /// </para>
+        /// </summary>
+        protected virtual string SelectTableReference(string table)
+        {
+            var quoted = QuoteIdentifier(table);
+            return PlainTableIdentifier.IsMatch(table ?? string.Empty)
+                ? quoted + " AS " + table
+                : quoted;
+        }
+
+        /// <summary>
         /// Creates a SELECT command with joins, conditions, grouping, order, limit and offset.
         /// </summary>
         public virtual DbCommand CreateSelectCommand(DbCommand command, IEnumerable<string> tableNames, IDictionary<int, string> fields, IEnumerable<Conditions.Join>? joinconditions = null, IEnumerable<Conditions.Condition>? conditions = null, IDictionary<int, string>? groupFields = null, IDictionary<string, bool>? orderFields = null, int? limit = null, int? offset = null)
@@ -749,7 +803,7 @@ namespace Birko.Data.SQL.Connectors
                 {
                     command.CommandText += ", ";
                 }
-                command.CommandText += QuoteIdentifier(table);
+                command.CommandText += SelectTableReference(table);
                 if (joins != null && joins.ContainsKey(table))
                 {
                     var joingroups = joins[table].GroupBy(x => new { x.Right, x.JoinType }).ToDictionary(x => x.Key, x => x.SelectMany(y => y.Conditions ?? Enumerable.Empty<Conditions.Condition>()).Where(z => z != null));
@@ -762,7 +816,7 @@ namespace Birko.Data.SQL.Connectors
                                 Conditions.JoinType.LeftOuter => " LEFT OUTER JOIN ",
                                 _ => " CROSS JOIN ",
                             };
-                        command.CommandText += QuoteIdentifier(joingroup.Key.Right);
+                        command.CommandText += SelectTableReference(joingroup.Key.Right);
                         if (joingroup.Key.JoinType != Conditions.JoinType.Cross && joingroup.Value != null && joingroup.Value.Any())
                         {
                             command.CommandText += " ON (";
