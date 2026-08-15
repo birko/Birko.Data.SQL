@@ -68,7 +68,6 @@
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Tables\IndexDefinition.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Exceptions\FieldAttributeException.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Exceptions\TableAttributeException.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Exceptions\WholeTableWriteException.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Models\AbstractLogModel.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Models\AbstractModel.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Models\AbstractDatabasePercentage.cs" />
