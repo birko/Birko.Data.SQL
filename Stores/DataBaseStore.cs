@@ -35,7 +35,25 @@ namespace Birko.Data.SQL.Stores
         public void SetTransactionContext(SqlTransactionContext? context)
         {
             TransactionContext = context;
-            Connector?.SetExternalTransaction(context?.Connection, context?.Transaction);
+        }
+
+        /// <summary>
+        /// Publishes <see cref="TransactionContext"/> for the duration of one operation. Returns null
+        /// (and costs nothing) when no context is set.
+        /// </summary>
+        /// <remarks>
+        /// Replaces the former <c>Connector.SetExternalTransaction</c> call, which published one caller's
+        /// transaction onto a connector cached process-wide per (type, settings id) — i.e. onto every
+        /// concurrent caller against the same database.
+        /// </remarks>
+        protected IDisposable? EnterTransactionScope()
+        {
+            var context = TransactionContext;
+            if (context == null || Connector == null)
+            {
+                return null;
+            }
+            return AmbientSqlTransaction.Enter(Connector.Settings.GetId(), context.Connection, context.Transaction);
         }
 
         /// <summary>
@@ -110,6 +128,7 @@ namespace Birko.Data.SQL.Stores
 
         protected override Guid CreateCore(T data, StoreDataDelegate<T>? storeDelegate = null)
         {
+            using var _tx = EnterTransactionScope();
             data.Guid ??= Guid.NewGuid();
             storeDelegate?.Invoke(data);
             Connector.Insert(data);
@@ -118,11 +137,13 @@ namespace Birko.Data.SQL.Stores
 
         protected override T? ReadCore(Expression<Func<T, bool>>? filter = null)
         {
+            using var _tx = EnterTransactionScope();
             return Connector?.Select(typeof(T), filter as LambdaExpression, null, 1, null)?.OfType<T>().FirstOrDefault();
         }
 
         protected override void UpdateCore(T data, StoreDataDelegate<T>? storeDelegate = null)
         {
+            using var _tx = EnterTransactionScope();
             List<SQL.Conditions.Condition> conditions = new List<SQL.Conditions.Condition>();
 
             foreach (var field in SQL.DataBase.GetPrimaryFields(typeof(T)))
@@ -137,6 +158,7 @@ namespace Birko.Data.SQL.Stores
         protected override void DeleteCore(T data)
         {
             if (data == null) return;
+            using var _tx = EnterTransactionScope();
 
             List<SQL.Conditions.Condition> conditions = new List<SQL.Conditions.Condition>();
             foreach (var field in SQL.DataBase.GetPrimaryFields(typeof(T)))
@@ -152,6 +174,7 @@ namespace Birko.Data.SQL.Stores
 
         protected override long CountCore(Expression<Func<T, bool>>? filter = null)
         {
+            using var _tx = EnterTransactionScope();
             return Connector?.SelectCount(typeof(T), filter) ?? 0;
         }
 

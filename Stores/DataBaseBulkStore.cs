@@ -41,6 +41,7 @@ namespace Birko.Data.SQL.Stores
         /// </summary>
         protected virtual IEnumerable<T> ReadCore(Expression<Func<T, bool>>? filter = null, OrderBy<T>? orderBy = null, int? limit = null, int? offset = null)
         {
+            using var _tx = EnterTransactionScope();
             return Connector?.Select(typeof(T), filter as LambdaExpression, orderBy?.ToDictionary(), limit, offset)?.OfType<T>() ?? Enumerable.Empty<T>();
         }
 
@@ -135,6 +136,7 @@ namespace Birko.Data.SQL.Stores
         public virtual void DeleteAll()
         {
             EnsureInitialized();
+            using var _tx = EnterTransactionScope();
             Connector?.DeleteAll(typeof(T));
         }
 
@@ -163,6 +165,8 @@ namespace Birko.Data.SQL.Stores
         {
             EnsureInitialized();
             if (Connector == null || updates.Assignments.Count == 0) return;
+            using var _tx = EnterTransactionScope();
+
 
             var table = SQL.DataBase.LoadTable(typeof(T));
             var fields = new Dictionary<int, string>();
@@ -203,6 +207,8 @@ namespace Birko.Data.SQL.Stores
             RequireFilter(filter, "delete");
             EnsureInitialized();
             if (Connector == null) return;
+            using var _tx = EnterTransactionScope();
+
             if (SQL.DataBase.IsExplicitAllRows(filter as LambdaExpression))
             {
                 Connector.DeleteAll(typeof(T));
@@ -222,6 +228,8 @@ namespace Birko.Data.SQL.Stores
         {
             EnsureInitialized();
             if (Connector == null) return Array.Empty<AggregateResult>();
+            using var _tx = EnterTransactionScope();
+
 
             var results = new List<AggregateResult>();
             foreach (var row in Connector.SelectAggregate(typeof(T), query))

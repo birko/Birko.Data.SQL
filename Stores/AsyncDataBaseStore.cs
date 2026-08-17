@@ -39,11 +39,42 @@ namespace Birko.Data.SQL.Stores
         /// <inheritdoc />
         public SqlTransactionContext? TransactionContext { get; private set; }
 
-        /// <inheritdoc />
+        /// <summary>
+        /// Sets the transaction this store's operations participate in, or null to clear.
+        /// </summary>
+        /// <remarks>
+        /// This is store INSTANCE state — matching <c>AsyncMongoDBStore</c>, <c>AsyncRavenDBStore</c> and
+        /// <c>AsyncCosmosDBStore</c> — and is therefore safe only while the store itself is per-scope.
+        /// It deliberately no longer calls <c>Connector.SetExternalTransaction</c>: connectors are cached
+        /// process-wide per (type, settings id), so that call published one caller's transaction to every
+        /// concurrent caller against the same database.
+        /// <para>
+        /// For a singleton store, or for a boundary spanning several stores, prefer
+        /// <see cref="SqlUnitOfWork"/>, which publishes an <see cref="AmbientSqlTransaction"/> scope that
+        /// travels with the async flow and needs no per-store call.
+        /// </para>
+        /// </remarks>
         public void SetTransactionContext(SqlTransactionContext? context)
         {
             TransactionContext = context;
-            Connector?.SetExternalTransaction(context?.Connection, context?.Transaction);
+        }
+
+        /// <summary>
+        /// Publishes <see cref="TransactionContext"/> for the duration of one operation, so the connector
+        /// runs it on that transaction. Returns null (and costs nothing) when no context is set.
+        /// </summary>
+        /// <remarks>
+        /// Routing the per-store door through the same ambient mechanism the unit of work uses is what
+        /// stops the two disagreeing about what "inside a transaction" means.
+        /// </remarks>
+        protected IDisposable? EnterTransactionScope()
+        {
+            var context = TransactionContext;
+            if (context == null || Connector == null)
+            {
+                return null;
+            }
+            return AmbientSqlTransaction.Enter(Connector.Settings.GetId(), context.Connection, context.Transaction);
         }
 
         /// <summary>
@@ -127,6 +158,7 @@ namespace Birko.Data.SQL.Stores
         protected override async Task<Guid> CreateCoreAsync(T data, StoreDataDelegate<T>? processDelegate = null, CancellationToken ct = default)
         {
             if (Connector == null || data == null) return Guid.Empty;
+            using var _tx = EnterTransactionScope();
 
             data.Guid ??= Guid.NewGuid();
             processDelegate?.Invoke(data);
@@ -141,6 +173,7 @@ namespace Birko.Data.SQL.Stores
         protected override async Task<T?> ReadCoreAsync(Expression<Func<T, bool>>? filter = null, CancellationToken ct = default)
         {
             if (Connector == null) return default;
+            using var _tx = EnterTransactionScope();
 
             if (AsyncConnector != null)
             {
@@ -167,6 +200,7 @@ namespace Birko.Data.SQL.Stores
         protected override async Task UpdateCoreAsync(T data, StoreDataDelegate<T>? processDelegate = null, CancellationToken ct = default)
         {
             if (Connector == null || data == null) return;
+            using var _tx = EnterTransactionScope();
 
             var conditions = new List<SQL.Conditions.Condition>();
 
@@ -186,6 +220,7 @@ namespace Birko.Data.SQL.Stores
         protected override async Task DeleteCoreAsync(T data, CancellationToken ct = default)
         {
             if (Connector == null || data == null) return;
+            using var _tx = EnterTransactionScope();
 
             var conditions = new List<SQL.Conditions.Condition>();
             foreach (var field in SQL.DataBase.GetPrimaryFields(typeof(T)))
@@ -206,6 +241,7 @@ namespace Birko.Data.SQL.Stores
         protected override async Task<long> CountCoreAsync(Expression<Func<T, bool>>? filter = null, CancellationToken ct = default)
         {
             if (Connector == null) return 0;
+            using var _tx = EnterTransactionScope();
 
             if (AsyncConnector != null)
                 return await AsyncConnector.SelectCountAsync(typeof(T), filter, ct);

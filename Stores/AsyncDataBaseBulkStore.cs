@@ -54,6 +54,7 @@ namespace Birko.Data.SQL.Stores
             CancellationToken ct = default)
         {
             if (Connector == null) return Enumerable.Empty<T>();
+            using var _tx = EnterTransactionScope();
 
             if (AsyncConnector != null)
             {
@@ -174,6 +175,7 @@ namespace Birko.Data.SQL.Stores
         {
             await EnsureInitializedAsync(ct).ConfigureAwait(false);
             if (Connector == null) return;
+            using var _tx = EnterTransactionScope();
             if (AsyncConnector != null)
                 await AsyncConnector.DeleteAllAsync(typeof(T), ct);
             else
@@ -208,6 +210,7 @@ namespace Birko.Data.SQL.Stores
         {
             await EnsureInitializedAsync(ct).ConfigureAwait(false);
             if (Connector == null || updates.Assignments.Count == 0) return;
+            using var _tx = EnterTransactionScope();
 
             var table = SQL.DataBase.LoadTable(typeof(T));
             var fields = new Dictionary<int, string>();
@@ -262,6 +265,7 @@ namespace Birko.Data.SQL.Stores
             }
             await EnsureInitializedAsync(ct).ConfigureAwait(false);
             if (Connector == null) return;
+            using var _tx = EnterTransactionScope();
             if (AsyncConnector != null)
                 await AsyncConnector.DeleteAsync(typeof(T), filter as LambdaExpression, ct);
             else
@@ -282,6 +286,7 @@ namespace Birko.Data.SQL.Stores
             await EnsureInitializedAsync(ct).ConfigureAwait(false);
             if (AsyncConnector == null || Connector == null)
                 return Array.Empty<AggregateResult>();
+            using var _tx = EnterTransactionScope();
 
             var results = new List<AggregateResult>();
             await foreach (var row in AsyncConnector.SelectAggregateAsync(typeof(T), query, ct))

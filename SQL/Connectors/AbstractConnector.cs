@@ -163,8 +163,26 @@ namespace Birko.Data.SQL.Connectors
             }
         }
 
+        /// <summary>
+        /// The ambient transaction boundary covering THIS connector's database, or null.
+        /// </summary>
+        /// <remarks>
+        /// Checked before <see cref="ExternalConnection"/> because it is the more specific answer, and
+        /// before the serialization gate because a command joining a caller's own connection needs no
+        /// mutual exclusion against commands on other connections — taking the gate there is how a
+        /// boundary holder and the gate holder would deadlock on each other.
+        /// </remarks>
+        protected AmbientSqlTransaction.Entry? AmbientTransaction
+            => AmbientSqlTransaction.Find(_settings?.GetId());
+
         public virtual void DoCommand(Action<DbCommand> createCommand, Action<DbCommand> executeCommand, bool isLock = false)
         {
+            var ambient = AmbientTransaction;
+            if (ambient != null)
+            {
+                RunCommandOn(ambient.Connection, ambient.Transaction, createCommand, executeCommand);
+                return;
+            }
             if (ExternalConnection != null && ExternalTransaction != null)
             {
                 RunCommandWithExternalTransaction(createCommand, executeCommand);
@@ -202,6 +220,15 @@ namespace Birko.Data.SQL.Connectors
 
         public virtual void DoCommandWithTransaction(Action<DbCommand> createCommand, Action<DbCommand> executeCommand, bool isLock = false)
         {
+            // Inside a boundary this must NOT open a nested transaction and must NOT commit or roll
+            // back — the owner commits. A committed inner transaction inside an outer one that later
+            // rolls back is partial application reporting green.
+            var ambient = AmbientTransaction;
+            if (ambient != null)
+            {
+                RunCommandOn(ambient.Connection, ambient.Transaction, createCommand, executeCommand);
+                return;
+            }
             if (ExternalConnection != null && ExternalTransaction != null)
             {
                 RunCommandWithExternalTransaction(createCommand, executeCommand);
@@ -257,13 +284,25 @@ namespace Birko.Data.SQL.Connectors
         }
 
         private void RunCommandWithExternalTransaction(Action<DbCommand> createCommand, Action<DbCommand> executeCommand)
+            => RunCommandOn(ExternalConnection!, ExternalTransaction!, createCommand, executeCommand);
+
+        /// <summary>
+        /// Runs one command on a connection and transaction owned by somebody else.
+        /// </summary>
+        /// <remarks>
+        /// Opens nothing, commits nothing, and disposes nothing but the command: the caller's connection
+        /// must outlive the operation, and disposing it mid-transaction is the failure this pattern
+        /// invites. Shared by the ambient boundary and the legacy external-transaction pair so the two
+        /// doors cannot disagree about what participating in a transaction means.
+        /// </remarks>
+        private void RunCommandOn(DbConnection connection, DbTransaction transaction, Action<DbCommand> createCommand, Action<DbCommand> executeCommand)
         {
             string? commandText = null;
             try
             {
-                using (var command = ExternalConnection!.CreateCommand())
+                using (var command = connection.CreateCommand())
                 {
-                    command.Transaction = ExternalTransaction;
+                    command.Transaction = transaction;
                     createCommand?.Invoke(command);
                     commandText = DataBase.GetGeneratedQuery(command);
                     OnExecute?.Invoke(commandText);
@@ -341,6 +380,17 @@ namespace Birko.Data.SQL.Connectors
             if (transformFunction == null)
             {
                 throw new ArgumentNullException(nameof(transformFunction));
+            }
+
+            // A read inside a boundary must run on the boundary's connection, or it cannot see the
+            // boundary's own uncommitted writes — read-then-write service logic would get a stale
+            // snapshot, which is a wrong answer rather than a missing feature.
+            var ambient = AmbientTransaction;
+            if (ambient != null)
+            {
+                foreach (var item in RunReaderCommandWithExternalTransaction(ambient.Connection, ambient.Transaction, createCommand, transformFunction))
+                    yield return item;
+                yield break;
             }
 
             // Use external transaction's connection if available

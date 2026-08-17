@@ -182,6 +182,83 @@ public override void SetSettings(Settings settings)
 
 ## Important Notes
 
+### Transaction boundaries (`AmbientSqlTransaction`, `SqlUnitOfWork`) — TASK-240
+
+A boundary is an **ambient `AsyncLocal` scope**, not state on the connector and not state on the store.
+Open one with `SqlUnitOfWork`; every store operation in that async flow joins it automatically.
+
+```csharp
+await using var uow = SqlUnitOfWork.FromStore(store);   // construct it in the flow that will use it
+await uow.BeginAsync();
+await orders.CreateAsync(order);        // both stores join the boundary with no per-store wiring
+await payments.CreateAsync(payment);
+await uow.CommitAsync();                 // or RollbackAsync() — nothing is committed until then
+```
+
+**What was measured (2026-08-17).** `AbstractAsyncConnector` inherited `ExternalConnection` /
+`ExternalTransaction` from its sync base and **never read them**: both async entry points opened their own
+connection, and the transactional one its own `BeginTransactionAsync`, per statement batch.
+`AsyncDataBaseStore.SetTransactionContext` called `Connector.SetExternalTransaction` and the async write
+path ignored it — so a caller could set a transaction, get no error, and have every write commit outside
+it. A hook that reads as available is worse than an absent feature.
+
+**Why ambient, and not the shape the NoSQL stores use.** Mongo, Raven and Cosmos keep the context as
+instance state on the store, which is safe only while the store is per-scope. Connectors here are cached
+process-wide per `(type, settings id)` in `DataBase.GetConnector`, and consumers register SQL stores as
+singletons over them — so connector state *and* store state are both process-wide in practice. Copying
+either would make one request's transaction capture every concurrent request's writes: a correctness
+disaster strictly worse than having no transactions. An `AsyncLocal` scope is visible only to the
+continuation chain that entered it, so it is correct under concurrent request threads regardless of store
+lifetime, and it composes across stores without the caller remembering to wire each one.
+
+- **Keyed by settings id.** A boundary on database A cannot capture a write to B; boundaries on different
+  databases nest and compose.
+- **Reads join it too.** `RunReaderCommandAsync` runs on the boundary's connection, so read-then-write
+  logic sees its own uncommitted writes instead of the pre-transaction snapshot.
+- **Checked before the `_asyncLock` gate.** A command on the caller's own connection needs no mutual
+  exclusion against commands on other connections, and taking the gate there is how a boundary holder and
+  the gate holder would wait on each other. (`isLock: true` currently has **zero** call sites
+  framework-wide, so the gate is unreachable today — but the ordering is deliberate, not incidental.)
+- **A participating command opens nothing, commits nothing and disposes nothing but the command.** The
+  caller's connection must outlive the operation; disposing it mid-transaction is the failure this pattern
+  invites. `RunCommandOnAsync` is also deliberately **not** retried — a retry inside a transaction whose
+  earlier statements succeeded can only fail differently.
+- **Nesting joins.** A second `SqlUnitOfWork` on the same database inside an open boundary becomes a
+  *participant* (`IsParticipant`): no second connection, no second transaction. Its commit is a no-op —
+  the owner commits — and its **rollback marks the boundary rollback-only**, so the owner's commit throws
+  `TransactionRollbackOnlyException` rather than silently discarding the participant's decision.
+- **⚠ Construct the unit of work synchronously, in the flow that will use it.** An `async` method cannot
+  publish an `AsyncLocal` to its caller — `AsyncMethodBuilder.Start` saves the ambient `ExecutionContext`
+  and restores it when the state machine returns — so `BeginAsync()` cannot install the scope. The
+  constructor installs a mutable cell; `BeginAsync` publishes the boundary by mutating it. This was got
+  wrong first and is pinned by
+  `AmbientSqlTransactionTests.An_async_method_cannot_publish_an_ambient_boundary_to_its_caller`.
+- **A boundary stops resolving the instant its owner leaves** (`Entry.IsEnded`), even for a flow still
+  holding a stale cell — because `DisposeAsync` cannot restore the cell either. Without it, a later read
+  ran on a disposed connection.
+- **`SetTransactionContext` still exists and now works**, as store *instance* state routed through the
+  same ambient mechanism, matching Mongo/Raven/Cosmos — with their caveat: safe only while the store is
+  per-scope. It no longer touches the connector. Prefer `SqlUnitOfWork` for anything spanning stores.
+- **The legacy `SetExternalTransaction` pair is untouched and remains sync-only.** Its sole caller is
+  `Birko.Data.Migrations.SQL`'s `SqlSchemaBuilder`, which runs single-threaded at startup. The ambient
+  scope is checked **first**, so that caller is unaffected.
+
+**Capabilities.** `IUnitOfWork.Capabilities` (`Birko.Data.Patterns.UnitOfWork.ITransactionCapabilities`)
+states per backend what a boundary actually promises — modelled on `IJobLockProvider.IsLeaseBased`. SQL
+declares `Atomic` / `Database` / reads-see-own-writes. The backends genuinely differ (Cosmos is
+single-partition, Mongo needs a replica set, ElasticSearch has no transactions), and a contract that hid
+that would be worse than none — see each provider's own `CLAUDE.md`.
+
+**Pinned by:** `Birko.Data.SQL.Tests.Connectors.AmbientSqlTransactionTests` (the primitive, 14),
+`Birko.Data.SQL.SqLite.Tests.TransactionBoundaryEndToEndTests` (real SQLite, 13) and
+`Birko.Data.SQL.PostgreSQL.Tests.TransactionBoundaryLiveTests` (live PostgreSQL, 10 — gated on
+`BIRKO_PG_HOST`). **Both engines, because SQLite cannot express the concurrency half**: it serialises at
+the file level, so a second writer — measured, even a second *reader* — blocks for the whole busy timeout
+while a write transaction is open. The genuinely simultaneous inside/outside proofs are the PostgreSQL
+ones. Mutation-tested: unwiring the ambient from the async connector fails 7 of 10 on PostgreSQL and 9 of
+207 on SQLite; making the ambient process-wide instead of flow-local fails **exactly the 3 concurrency
+tests** and no others — which is what a naive fix looks like from a single-threaded suite.
+
 ### Index creation during schema-ensure (`CreateTable(IEnumerable<Tables.Table>)`)
 Schema-ensure creates declared indexes **one statement per index**, and an index it cannot build is
 **recorded, not thrown** — on `AbstractConnector.IndexCreationFailures`, with the `OnIndexCreationFailed`

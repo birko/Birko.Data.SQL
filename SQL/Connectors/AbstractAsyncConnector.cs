@@ -33,6 +33,15 @@ namespace Birko.Data.SQL.Connectors
 
         public virtual async Task DoCommandAsync(Func<DbCommand, Task> createCommand, Func<DbCommand, Task> executeCommand, bool isLock = false, CancellationToken ct = default)
         {
+            // Checked BEFORE the gate: a command joining the caller's own connection needs no mutual
+            // exclusion against commands on other connections, and taking the gate here is exactly how
+            // a boundary holder and the gate holder would wait on each other.
+            var ambient = AmbientTransaction;
+            if (ambient != null)
+            {
+                await RunCommandOnAsync(ambient.Connection, ambient.Transaction, createCommand, executeCommand);
+                return;
+            }
             if (!isLock)
             {
                 await RunCommandAsync(createCommand, executeCommand, ct);
@@ -54,6 +63,14 @@ namespace Birko.Data.SQL.Connectors
 
         public virtual async Task DoCommandWithTransactionAsync(Func<DbCommand, Task> createCommand, Func<DbCommand, Task> executeCommand, bool isLock = false, CancellationToken ct = default)
         {
+            // Inside a boundary: no nested BeginTransactionAsync, no commit, no rollback, no disposal
+            // of the caller's connection. The owner commits.
+            var ambient = AmbientTransaction;
+            if (ambient != null)
+            {
+                await RunCommandOnAsync(ambient.Connection, ambient.Transaction, createCommand, executeCommand);
+                return;
+            }
             if (!isLock)
             {
                 await RunCommandTransactionAsync(createCommand, executeCommand, ct);
@@ -68,6 +85,36 @@ namespace Birko.Data.SQL.Connectors
             finally
             {
                 _asyncLock.Release();
+            }
+        }
+
+        /// <summary>
+        /// Runs one command asynchronously on a connection and transaction owned by somebody else.
+        /// </summary>
+        /// <remarks>
+        /// The async twin of <c>RunCommandOn</c>. Deliberately NOT wrapped in
+        /// <c>ExecuteWithRetryAsync</c>: a retry would re-run a statement inside a transaction whose
+        /// earlier statements already succeeded, and on most providers the first failure has already
+        /// aborted the transaction, so the retry can only fail differently. Retrying is the boundary
+        /// owner's decision, not this method's.
+        /// </remarks>
+        private async Task RunCommandOnAsync(DbConnection connection, DbTransaction transaction, Func<DbCommand, Task> createCommand, Func<DbCommand, Task> executeCommand)
+        {
+            string? commandText = null;
+            try
+            {
+                await using (var command = connection.CreateCommand())
+                {
+                    command.Transaction = transaction;
+                    if (createCommand != null) await createCommand.Invoke(command);
+                    commandText = DataBase.GetGeneratedQuery(command);
+                    InvokeOnExecute(commandText);
+                    if (executeCommand != null) await executeCommand.Invoke(command);
+                }
+            }
+            catch (Exception ex)
+            {
+                InitException(ex, commandText);
             }
         }
 
@@ -138,11 +185,40 @@ namespace Birko.Data.SQL.Connectors
                 throw new ArgumentNullException(nameof(transformFunction));
             }
 
+            // A read inside a boundary runs on the boundary's connection, so it sees the boundary's own
+            // uncommitted writes. Without this, read-then-write logic inside a transaction gets a stale
+            // snapshot — a wrong answer, not a missing feature.
+            var ambient = AmbientTransaction;
+            if (ambient != null)
+            {
+                await foreach (var row in ReadOnAsync(ambient.Connection, ambient.Transaction, createCommand, transformFunction, ct))
+                {
+                    yield return row;
+                }
+                yield break;
+            }
+
             await using var db = CreateConnection(_settings);
             await db.OpenAsync(ct);
+            await foreach (var row in ReadOnAsync(db, null, createCommand, transformFunction, ct))
+            {
+                yield return row;
+            }
+        }
+
+        /// <summary>
+        /// Streams a reader over an already-open connection, optionally enlisted in a transaction.
+        /// </summary>
+        /// <remarks>
+        /// Disposes the command and the reader but never the connection — when the connection belongs to
+        /// an ambient boundary, closing it here would end the caller's transaction mid-operation.
+        /// </remarks>
+        private async IAsyncEnumerable<IEnumerable<object>> ReadOnAsync(DbConnection db, DbTransaction? transaction, Func<DbCommand, Task> createCommand, Func<DbDataReader, Task<IEnumerable<object>>> transformFunction, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+        {
             string? commandText = null;
             await using (var command = db.CreateCommand())
             {
+                command.Transaction = transaction;
                 bool faulted = false;
                 try
                 {
