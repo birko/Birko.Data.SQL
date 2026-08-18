@@ -558,6 +558,26 @@ namespace Birko.Data.SQL.Connectors
         public virtual bool IsIndexAlreadyExistsException(Exception ex) => false;
 
         /// <summary>
+        /// Whether <paramref name="ex"/> reports that the index a <i>conditional</i> drop asked for is
+        /// <b>already absent</b> — the mirror of <see cref="IsIndexAlreadyExistsException"/>.
+        /// </summary>
+        /// <remarks>
+        /// TASK-249. Default <c>false</c>, and off MySQL that is the whole behaviour: every other provider's
+        /// <see cref="DropIndexSql"/> carries <c>IF EXISTS</c>, so dropping an absent index is a server-side
+        /// no-op and nothing reaches the client. MySQL accepts no <c>IF EXISTS</c> on <c>DROP INDEX</c>, so it
+        /// answers here instead (error 1091).
+        /// <para>
+        /// This exists so <c>IIndexManager</c> is uniform across providers for the whole verb family rather
+        /// than for <c>CreateAsync</c> alone — fixing create and leaving drop would ship a manager whose
+        /// create tolerates "already there" beside a drop that throws for "already gone", on one provider
+        /// only. Note the connector's own <c>DropIndexes</c> deliberately does <b>not</b> consult this: a
+        /// caller naming a specific index to drop should fail loudly, and the migrations drop step depends on
+        /// that.
+        /// </para>
+        /// </remarks>
+        public virtual bool IsIndexMissingException(Exception ex) => false;
+
+        /// <summary>
         /// Generates a DROP INDEX SQL statement.
         /// Override in provider-specific connectors if the DDL syntax differs (e.g. MSSQL).
         /// </summary>

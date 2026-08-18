@@ -24,6 +24,15 @@ namespace Birko.Data.SQL
             RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
         /// <summary>
+        /// <see cref="_bareIdentifier"/> without the optional <c>Table.</c> qualifier — for a sink where a
+        /// qualifier is not merely unnecessary but invalid (an index column list). Same <c>\A…\z</c>
+        /// anchoring, for the same reason: .NET's <c>$</c> also matches before a trailing newline.
+        /// </summary>
+        private static readonly Regex _unqualifiedIdentifier = new(
+            @"\A[A-Za-z_][A-Za-z0-9_]*\z",
+            RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+        /// <summary>
         /// Resolves a <see cref="Birko.Rules.Rule.Field"/> into the SQL select name of the column that
         /// <paramref name="entityType"/> actually has.
         /// <para>
@@ -178,11 +187,19 @@ namespace Birko.Data.SQL
                     "An index field has a blank Name. Every indexed field must name a column.", nameof(field));
             }
 
-            if (!_bareIdentifier.IsMatch(field!))
+            // NOT _bareIdentifier: that pattern allows an optional `Table.` qualifier, which is correct for
+            // the WHERE-clause sink it was written for and WRONG here. A CREATE INDEX column list takes no
+            // qualifier on any supported provider — `(Docs.Status)` is a syntax error, not a resolvable
+            // column — and the framework-wide invariant is that a qualifier is only ever emitted where a bare
+            // alias introduces it (TASK-211), which index DDL has none of. Accepting one would turn a clear
+            // ArgumentException into a provider syntax error, i.e. the guard would pass the payload's
+            // harmless cousin through to break the statement anyway.
+            if (!_unqualifiedIdentifier.IsMatch(field!))
             {
                 throw new ArgumentException(
-                    $"Index field '{field}' is not a plain column identifier, and index columns are "
-                    + "interpolated bare into the CREATE INDEX statement. Supply a bare column name.",
+                    $"Index field '{field}' is not a plain, unqualified column identifier, and index columns "
+                    + "are interpolated bare into the CREATE INDEX statement. Supply a bare column name "
+                    + "(a 'Table.Column' qualifier is not valid in an index column list).",
                     nameof(field));
             }
 

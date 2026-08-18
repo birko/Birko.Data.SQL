@@ -68,6 +68,18 @@ namespace Birko.Data.SQL.IndexManagement
             {
                 await ExecuteNonQueryAsync(sql, ct).ConfigureAwait(false);
             }
+            catch (Exception ex) when (Connector.IsIndexAlreadyExistsException(ex))
+            {
+                // TASK-249. This path executes through its own connection and deliberately bypasses
+                // AbstractConnector.CreateIndexes, so it does not inherit that funnel's 1061 tolerance — and
+                // without it IIndexManager.CreateAsync was NON-UNIFORM: an already-present index is a
+                // server-side no-op on SQLite/PostgreSQL (IF NOT EXISTS) and MSSql (sys.indexes guard), and
+                // threw IndexManagementException on MySQL alone. Same "an opt-out only one provider can
+                // honour is a silent divergence" reasoning TASK-245 applied one layer down.
+                //
+                // Only "already there" is tolerated: an unbuildable index (MySQL 1062) is a different code
+                // and still surfaces wrapped below, so nothing about the loud-explicit-call contract changes.
+            }
             catch (Exception ex)
             {
                 throw new IndexManagementException(
@@ -88,6 +100,19 @@ namespace Birko.Data.SQL.IndexManagement
             try
             {
                 await ExecuteNonQueryAsync(sql, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (Connector.IsIndexMissingException(ex))
+            {
+                // TASK-249, the mirror of CreateAsync's tolerance above — and it is here for the same reason
+                // the "guard the whole verb family or none of it" rule exists: tolerating "already there" on
+                // create while throwing for "already gone" on drop would ship a half-uniform manager.
+                //
+                // Every other provider's DropIndexSql carries IF EXISTS, so dropping an absent index is a
+                // server-side no-op there and nothing reaches the client; MySQL accepts no IF EXISTS, so
+                // without this it threw IndexManagementException (1091) on that provider alone.
+                //
+                // The connector's own DropIndexes does NOT tolerate this — a caller naming a specific index
+                // to drop should fail loudly, and the migrations drop step relies on that.
             }
             catch (Exception ex)
             {

@@ -42,9 +42,17 @@ namespace Birko.Data.SQL.Connectors
                     // surface the failure (IndexCreationFailures / OnIndexCreationFailed) at startup. It is
                     // NOT silent — that is the whole point of recording it rather than swallowing it.
                     //
-                    // Note the public CreateIndexes(...) below is UNCHANGED and still throws: an explicit
-                    // call (e.g. the migrations SqlSchemaBuilder) is a caller asking for this index now, and
-                    // must fail loudly. Only schema-ensure degrades.
+                    // The public CreateIndexes(...) below still throws for an index that cannot be BUILT:
+                    // an explicit call (e.g. the migrations SqlSchemaBuilder) is a caller asking for this
+                    // index now, and must fail loudly. Only schema-ensure degrades.
+                    //
+                    // TASK-245 narrowed that to what it meant, so this comment no longer says "UNCHANGED":
+                    // the public path is now IDEMPOTENT for an index that is merely ALREADY PRESENT, because
+                    // that is what SQLite/PostgreSQL (native IF NOT EXISTS) and MSSql (a synthesised
+                    // sys.indexes guard) have always reported as success, and MySQL — which has no
+                    // conditional form — had been the only provider throwing. Unbuildable (MySQL 1062) and
+                    // already-present (1061) are distinct codes, so tolerating the latter cannot swallow the
+                    // former. Pass throwIfExists: true for the loud behaviour on every provider.
                     foreach (var index in table.Indexes!.Values)
                     {
                         try
