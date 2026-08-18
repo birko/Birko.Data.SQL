@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
@@ -79,18 +79,35 @@ namespace Birko.Data.SQL.Connectors
             }, true);
         }
 
-        public virtual async Task CreateIndexesAsync(string tableName, IEnumerable<Tables.IndexDefinition> indexes, CancellationToken ct = default)
+        /// <param name="throwIfExists">See the sync twin — false (default) is an ensure, true is a plain create.</param>
+        /// <remarks>
+        /// <c>throwIfExists</c> sits <b>after</b> <paramref name="ct"/>, against the usual
+        /// cancellation-token-last convention, and deliberately: the token is already the third positional
+        /// parameter and at least one caller passes it that way, so moving it would be a source-breaking
+        /// change for every consumer that does the same. Pass the new flag by name.
+        /// </remarks>
+        public virtual async Task CreateIndexesAsync(string tableName, IEnumerable<Tables.IndexDefinition> indexes, CancellationToken ct = default, bool throwIfExists = false)
         {
             foreach (var index in indexes)
             {
-                await DoDdlCommandAsync(async (command) =>
+                try
                 {
-                    command.CommandText = CreateIndexSql(tableName, index);
-                    await Task.CompletedTask;
-                }, async (command) =>
+                    await DoDdlCommandAsync(async (command) =>
+                    {
+                        command.CommandText = CreateIndexSql(tableName, index, conditional: !throwIfExists);
+                        await Task.CompletedTask;
+                    }, async (command) =>
+                    {
+                        await command.ExecuteNonQueryAsync(ct);
+                    }, true);
+                }
+                catch (Exception ex) when (!throwIfExists && IsIndexAlreadyExistsException(ex))
                 {
-                    await command.ExecuteNonQueryAsync(ct);
-                }, true);
+                    // TASK-245 — see the sync twin in AbstractConnector_Create.cs for the full reasoning.
+                    // In short: MySQL has no IF NOT EXISTS for CREATE INDEX, so "already there" (1061) is
+                    // classified here; 1062 (unbuildable) is a different code and still reaches the recorder,
+                    // leaving TASK-204 intact. The exception is wrapped by InitException, hence the chain walk.
+                }
             }
         }
 

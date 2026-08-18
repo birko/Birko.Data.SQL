@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -140,6 +140,49 @@ namespace Birko.Data.SQL
                     $"Rule field '{field}' is not a plain column identifier, and rule fields are "
                     + "interpolated into the WHERE clause. Pass the entity type to RuleConditionConverter "
                     + "so the field can be resolved against table metadata, or supply a bare column name.",
+                    nameof(field));
+            }
+
+            return field!;
+        }
+
+        /// <summary>
+        /// The same bare-identifier check applied to an <b>index</b> column name (TASK-245).
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Third sink in the interpolated-identifier family, and it arrived as a consequence of a fix:
+        /// TASK-245 made index column identifiers be emitted <b>bare</b>, because a quoted one cannot resolve
+        /// the case-folded column that bare-column <c>CREATE TABLE</c> actually creates on PostgreSQL. That
+        /// is safe wherever the name comes from table metadata — schema-ensure resolves
+        /// <c>[IndexedField]</c> / <c>[CompositeIndex]</c> columns against mapped properties — but
+        /// <c>IIndexManager.CreateAsync</c> takes its field names from the <b>caller</b> as free text and
+        /// they land in <c>CommandText</c>. Before that change <c>QuoteIdentifier</c> was incidentally
+        /// containing them; bare, the payload breaks out, exactly as SH-H023's rule field did.
+        /// </para>
+        /// <para>
+        /// <c>SqlIndexManager</c> holds a table name and no entity type, so metadata resolution is
+        /// unavailable and this is the sanctioned weaker fallback — it cannot fix a <c>[NamedField]</c>
+        /// remapping, but it refuses every payload. It shares <c>_bareIdentifier</c> with
+        /// <see cref="ValidateRuleFieldIdentifier"/> deliberately: one regex, so the two sinks cannot drift
+        /// apart about what an acceptable identifier is, and anchored <c>\A…\z</c> because .NET's <c>$</c>
+        /// also matches before a trailing newline.
+        /// </para>
+        /// </remarks>
+        /// <exception cref="ArgumentException">The name is blank or not a bare identifier.</exception>
+        public static string ValidateIndexFieldIdentifier(string? field)
+        {
+            if (string.IsNullOrWhiteSpace(field))
+            {
+                throw new ArgumentException(
+                    "An index field has a blank Name. Every indexed field must name a column.", nameof(field));
+            }
+
+            if (!_bareIdentifier.IsMatch(field!))
+            {
+                throw new ArgumentException(
+                    $"Index field '{field}' is not a plain column identifier, and index columns are "
+                    + "interpolated bare into the CREATE INDEX statement. Supply a bare column name.",
                     nameof(field));
             }
 

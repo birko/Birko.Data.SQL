@@ -89,17 +89,45 @@ namespace Birko.Data.SQL.Connectors
             }, true);
         }
 
-        public virtual void CreateIndexes(string tableName, IEnumerable<Tables.IndexDefinition> indexes)
+        /// <param name="throwIfExists">
+        /// When false (the default) this is an <i>ensure</i>: an index that is already present is not an
+        /// error. When true the statement is emitted without any conditional form on every provider and an
+        /// already-present index throws — so the flag means the same thing everywhere rather than being
+        /// honoured on MySQL alone.
+        /// </param>
+        public virtual void CreateIndexes(string tableName, IEnumerable<Tables.IndexDefinition> indexes, bool throwIfExists = false)
         {
             foreach (var index in indexes)
             {
-                DoDdlCommand((command) =>
+                try
                 {
-                    command.CommandText = CreateIndexSql(tableName, index);
-                }, (command) =>
+                    DoDdlCommand((command) =>
+                    {
+                        command.CommandText = CreateIndexSql(tableName, index, conditional: !throwIfExists);
+                    }, (command) =>
+                    {
+                        command.ExecuteNonQuery();
+                    }, true);
+                }
+                catch (Exception ex) when (!throwIfExists && IsIndexAlreadyExistsException(ex))
                 {
-                    command.ExecuteNonQuery();
-                }, true);
+                    // TASK-245. The statement being emulated is CREATE INDEX **IF NOT EXISTS**, and MySQL
+                    // supports no conditional form for it — so MySQL emits the plain statement and the
+                    // "already there" case (error 1061, Duplicate key name) is answered HERE rather than by
+                    // the server. On SQLite/PostgreSQL (native IF NOT EXISTS) and MSSql (a synthesised
+                    // sys.indexes guard) the condition never reaches the client and this filter never fires,
+                    // which is why the base predicate returns false.
+                    //
+                    // This does NOT weaken TASK-204. That contract is about an index which cannot be BUILT;
+                    // on MySQL that is error 1062 (Duplicate entry), a different code, so it still reaches
+                    // the recorder in schema-ensure and still throws from an explicit call. "The object you
+                    // asked for already exists" is what the other three providers already report as success,
+                    // so tolerating it makes MySQL agree with them rather than diverge.
+                    //
+                    // The exception arrives WRAPPED: RunCommandTransaction routes failures through
+                    // InitException, which re-throws as `new Exception(commandText, ex)`. That is why the
+                    // predicate walks InnerException instead of testing the top-level type.
+                }
             }
         }
 

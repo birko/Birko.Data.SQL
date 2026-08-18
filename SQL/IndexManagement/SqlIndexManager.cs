@@ -1,4 +1,4 @@
-using Birko.Data.Patterns.IndexManagement;
+﻿using Birko.Data.Patterns.IndexManagement;
 using Birko.Data.SQL.Connectors;
 using System;
 using System.Collections.Generic;
@@ -57,10 +57,12 @@ namespace Birko.Data.SQL.IndexManagement
             if (string.IsNullOrWhiteSpace(definition.Name)) throw new ArgumentException("Index name is required.", nameof(definition));
             if (definition.Fields == null || definition.Fields.Count == 0) throw new ArgumentException("At least one field is required.", nameof(definition));
 
+            // TASK-245 — one producer. ToSqlIndexDefinition now carries Unique, so the connector's own
+            // emitter covers both cases; the parallel CreateUniqueIndexSql family (here plus PostgreSQL and
+            // MSSql overrides) existed only because that flag was dropped on the way in, and one of those
+            // copies was broken on PostgreSQL.
             var sqlIndex = ToSqlIndexDefinition(definition);
-            var sql = definition.Unique
-                ? CreateUniqueIndexSql(scope!, sqlIndex)
-                : _connector.CreateIndexSql(scope!, sqlIndex);
+            var sql = _connector.CreateIndexSql(scope!, sqlIndex);
 
             try
             {
@@ -170,16 +172,12 @@ WHERE table_name = '{safeTable}'
 ORDER BY index_name, seq_in_index";
         }
 
-        /// <summary>
-        /// SQL for CREATE UNIQUE INDEX.
-        /// </summary>
-        protected virtual string CreateUniqueIndexSql(string tableName, Tables.IndexDefinition index)
-        {
-            var columns = string.Join(", ", index.Columns.Select(c =>
-                _connector.QuoteIdentifier(c.ColumnName) + (c.IsDescending ? " DESC" : "")));
-
-            return $"CREATE UNIQUE INDEX IF NOT EXISTS {_connector.QuoteIdentifier(index.Name)} ON {_connector.QuoteIdentifier(tableName)} ({columns})";
-        }
+        // TASK-245 removed CreateUniqueIndexSql (and its PostgreSQL / MSSql overrides). It duplicated
+        // AbstractConnectorBase.CreateIndexSql for the Unique case, and the duplication was load-bearing
+        // only because ToSqlIndexDefinition dropped the Unique flag. Both halves are fixed: the flag is
+        // copied, and the connector emitter is the single producer. If a dialect ever needs a genuinely
+        // different unique statement, override CreateIndexSql on that connector so index DDL keeps one
+        // producer.
 
         #endregion
 
@@ -191,15 +189,25 @@ ORDER BY index_name, seq_in_index";
                 throw new ArgumentException("Table name (scope) is required for SQL index management.", nameof(scope));
         }
 
-        private static Tables.IndexDefinition ToSqlIndexDefinition(IndexDefinition definition)
+        /// <summary>
+        /// Converts a provider-neutral <see cref="IndexDefinition"/> into the SQL one the connector emitter
+        /// takes. <c>protected</c> rather than <c>private</c> so the Unique-flag hand-off (TASK-245) can be
+        /// pinned offline — every end-to-end assertion for it needs a live server.
+        /// </summary>
+        protected static Tables.IndexDefinition ToSqlIndexDefinition(IndexDefinition definition)
         {
-            var sqlDef = new Tables.IndexDefinition { Name = definition.Name };
+            // Unique is carried across (TASK-245). Dropping it here is what forced a parallel
+            // CreateUniqueIndexSql emitter to exist in three classes, and it is also the root of the
+            // separate migrations defect where SqlIndexBuilder.Build() loses .Unique() the same way.
+            var sqlDef = new Tables.IndexDefinition { Name = definition.Name, Unique = definition.Unique };
             int order = 0;
             foreach (var field in definition.Fields)
             {
                 sqlDef.Columns.Add(new Tables.IndexColumn
                 {
-                    ColumnName = field.Name,
+                    // Interpolated BARE into CREATE INDEX (TASK-245), and these names come from the caller
+                    // rather than from table metadata — so they get the shared bare-identifier check.
+                    ColumnName = DataBase.ValidateIndexFieldIdentifier(field.Name),
                     IsDescending = field.IsDescending,
                     Order = order++
                 });

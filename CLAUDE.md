@@ -283,6 +283,67 @@ them (TASK-204).
 - An empty `IndexCreationFailures` is **not** proof every declared index exists — an entity nothing has
   touched yet has not attempted its indexes.
 
+#### The emitted statement (TASK-245)
+`AbstractConnectorBase.CreateIndexSql(tableName, index, conditional = true)` is the **single producer** of
+index DDL for every dialect — the index managers' parallel `CreateUniqueIndexSql` family is gone (see
+below).
+
+- **Column identifiers are emitted BARE, the table identifier quoted.** Not cosmetic: `CreateTable` emits
+  column definitions bare, so on PostgreSQL every column is stored case-folded, and a quoted `"Status"`
+  cannot resolve it — measured on PostgreSQL 16 as `ERROR 42703: column "Status" does not exist`, meaning
+  **no declared PascalCase index could be created on PostgreSQL at all**, silently, since TASK-204. Seventh
+  instance of the identifier family; § Conventions in the aggregator CLAUDE.md is the standing rule. Do not
+  "restore" the quoting from symmetry with the table name.
+  MSSql's override keeps its columns bracket-quoted **deliberately** — its identifiers are case-insensitive
+  under the default collation, so there is no defect there and no live measurement backing a change.
+- **`conditional` controls the ensure-vs-create semantics, uniformly.** Default true emits `IF NOT EXISTS`
+  (SQLite/PostgreSQL) or a synthesised `sys.indexes` guard (MSSql); MySQL has **no conditional form at all**
+  (`CREATE INDEX IF NOT EXISTS` is `ERROR 1064`) and instead relies on the predicate below. Passing
+  `CreateIndexes(..., throwIfExists: true)` drops the conditional form on **every** provider, so the flag
+  means the same thing everywhere rather than being honoured on one and silently ignored on three.
+- **`IsIndexAlreadyExistsException` is how a provider without a conditional form fakes one.** Base returns
+  `false` — that is the whole no-behaviour-change-off-MySQL claim, and it is asserted, not argued. MySQL
+  matches error **1061** (`Duplicate key name`) on the **code**, walking `InnerException` because
+  `InitException` re-wraps every command failure.
+- **"Already there" is not "unbuildable".** On MySQL those are different codes — 1061 vs **1062**
+  (`Duplicate entry`) — so tolerating the former cannot swallow the latter and TASK-204 is untouched.
+  Widening the predicate to any `MySqlException` fails 4 of the MySQL live suite's tests.
+- **The public `CreateIndexes` is therefore idempotent on MySQL**, which is a deliberate change to the
+  bullet above: it already was on the other three (native or synthesised conditional), and its one external
+  caller — `SqlSchemaBuilder` — wants a re-applied migration to succeed. The "still throws" contract holds
+  where it means something: an *unbuildable* index (1062) still throws from the explicit path. Both halves
+  are pinned by tests.
+- A same-name index over **different columns** is silently accepted on every provider. Faithful, not a hole:
+  measured on PostgreSQL 16, `CREATE INDEX IF NOT EXISTS` reports *"relation already exists, skipping"* and
+  keeps the old definition; MSSql's guard compares the name alone.
+- **MySQL `DROP INDEX` takes no `IF EXISTS` and requires `ON <table>`** — the base emitted neither
+  correctly, so no declared index could be dropped there either. Dropping an absent index on MySQL now
+  **throws** (1091) where the base's `IF EXISTS` tolerated it: deliberate, because a `DropIndexes` caller
+  named a specific index and the migrations drop step should fail loudly.
+- **Still broken on MySQL, tracked separately:** an index over an *unbounded* `string` (which maps to
+  `LONGTEXT`) fails with **1170** — MySQL cannot index a BLOB/TEXT column without a key length. Bounded
+  strings (`[MaxLengthField(n)]` → `VARCHAR(n)`) are fine. TASK-248; the boundary is pinned by a test that
+  asserts 1170, so it cannot move silently.
+- **`CreateIndexesAsync` has no production caller through stores.** `AsyncDataBaseStore.InitCoreAsync` calls
+  the **sync** `Connector.CreateTable` inside a `Task.Run`, so an async store's schema-ensure runs the sync
+  index loop. The async loop is reachable only via an explicit `CreateTableAsync`. Both are wired and tested
+  — but a revert of only the async site fails **0** tests, so measure against the sync site when checking
+  this path.
+
+#### One producer for unique index DDL
+`SqlIndexManager.ToSqlIndexDefinition` used to drop the `Unique` flag on the way in, which is the *only*
+reason a parallel `CreateUniqueIndexSql` existed on the base, `PostgreSqlIndexManager` and
+`MSSqlIndexManager`. TASK-245 carries the flag across and deletes all three; `CreateAsync` calls the
+connector emitter unconditionally. The PostgreSQL copy quoted its columns, so it could never build a unique
+index on a PascalCase entity — a second, independent instance of the identifier defect. If a dialect ever
+needs a genuinely different unique statement, override `CreateIndexSql` on that **connector** so index DDL
+keeps one producer.
+
+`IIndexManager.CreateAsync` executes through `SqlIndexManager`'s own `ExecuteNonQueryAsync`, **not** the
+connector's `CreateIndexes` funnel, so it does not get the 1061 tolerance. Correct for an explicit
+bare-metal call whose failure is already wrapped in `IndexManagementException` and whose callers have
+`ExistsAsync`.
+
 ### Enum Support
 Enum properties are automatically mapped to `INTEGER` fields. `IntegerField` handles read/write conversion via `Enum.ToObject()` and `(int)` cast. Both non-nullable and nullable enums are supported.
 

@@ -509,14 +509,53 @@ namespace Birko.Data.SQL.Connectors
         /// Generates a CREATE INDEX SQL statement for the given table and index definition.
         /// Override in provider-specific connectors if the DDL syntax differs.
         /// </summary>
-        public virtual string CreateIndexSql(string tableName, Tables.IndexDefinition index)
+        /// <param name="conditional">
+        /// When true (the default) the statement is an <i>ensure</i>: it must not fail because the index is
+        /// already present. Providers express that natively via <c>IF NOT EXISTS</c>; MySQL has no such form
+        /// and instead relies on <see cref="IsIndexAlreadyExistsException"/> at the
+        /// <c>CreateIndexes</c> funnel. When false the statement is a plain <i>create</i> that fails if the
+        /// index exists, which is what <c>CreateIndexes(..., throwIfExists: true)</c> asks for.
+        /// </param>
+        /// <remarks>
+        /// TASK-245 — <b>column identifiers are emitted BARE, table identifiers quoted</b>, per
+        /// CLAUDE.md § Conventions. This is not cosmetic: <c>CreateTable</c> emits column definitions bare,
+        /// so on PostgreSQL every column is stored case-folded, and a quoted <c>"Status"</c> here could not
+        /// resolve it — measured on PostgreSQL 16 as <c>ERROR 42703: column "Status" does not exist</c>,
+        /// which meant <b>no declared PascalCase index could be created on PostgreSQL at all</b>. Do not
+        /// "restore" the quoting from symmetry with the table name; the base-table DDL is what settles it.
+        /// </remarks>
+        public virtual string CreateIndexSql(string tableName, Tables.IndexDefinition index, bool conditional = true)
         {
             var columns = string.Join(", ", index.Columns.Select(c =>
-                QuoteIdentifier(c.ColumnName) + (c.IsDescending ? " DESC" : "")));
+                c.ColumnName + (c.IsDescending ? " DESC" : "")));
 
             var unique = index.Unique ? "UNIQUE " : "";
-            return $"CREATE {unique}INDEX IF NOT EXISTS {QuoteIdentifier(index.Name)} ON {QuoteIdentifier(tableName)} ({columns})";
+            var ifNotExists = conditional ? "IF NOT EXISTS " : "";
+            return $"CREATE {unique}INDEX {ifNotExists}{QuoteIdentifier(index.Name)} ON {QuoteIdentifier(tableName)} ({columns})";
         }
+
+        /// <summary>
+        /// Whether <paramref name="ex"/> reports that the index a <i>conditional</i> create asked for is
+        /// <b>already present</b> — not that it could not be built.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// TASK-245. Default <c>false</c>, and that is the whole behaviour off MySQL: SQLite and PostgreSQL
+        /// emit <c>IF NOT EXISTS</c> and MSSql synthesises a <c>sys.indexes</c> guard, so on those three the
+        /// condition never reaches the client and there is nothing to classify. MySQL supports no
+        /// conditional form for <c>CREATE INDEX</c> at all, so it emits the plain statement and answers this
+        /// question instead.
+        /// </para>
+        /// <para>
+        /// <b>"Already there" is not "unbuildable", and the distinction is the whole point.</b> On MySQL the
+        /// two are different codes — 1061 <c>Duplicate key name</c> versus 1062 <c>Duplicate entry</c> — so
+        /// tolerating the former cannot swallow the latter, and TASK-204's contract that a genuinely
+        /// unbuildable index is recorded (schema-ensure) or thrown (explicit call) is untouched. An
+        /// implementation must match on the provider's error <b>code</b>, never on message text, and must
+        /// walk <c>InnerException</c>: <c>AbstractConnector.InitException</c> re-wraps every command failure.
+        /// </para>
+        /// </remarks>
+        public virtual bool IsIndexAlreadyExistsException(Exception ex) => false;
 
         /// <summary>
         /// Generates a DROP INDEX SQL statement.
