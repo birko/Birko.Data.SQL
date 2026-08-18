@@ -1,4 +1,4 @@
-﻿using Birko.Data.SQL.Fields;
+using Birko.Data.SQL.Fields;
 using Birko.Data.SQL.Tables;
 using System;
 using System.Collections.Concurrent;
@@ -190,6 +190,14 @@ namespace Birko.Data.SQL
                     var field = fields.Values.FirstOrDefault(f => f.Property?.Name == prop.Name);
                     var columnName = field?.Name ?? prop.Name;
 
+                    // TASK-248: a provider whose column type depends on being indexed needs to know here,
+                    // because this is the only place the declaration is resolved against the field. MySQL
+                    // maps an unbounded string to LONGTEXT and cannot index BLOB/TEXT without a key length.
+                    if (field != null)
+                    {
+                        field.IsIndexed = true;
+                    }
+
                     idx.Columns.Add(new IndexColumn
                     {
                         ColumnName = columnName,
@@ -250,6 +258,10 @@ namespace Birko.Data.SQL
                         throw new Exceptions.TableAttributeException(
                             $"CompositeIndex '{name}' on {type.FullName}: property '{propName}' is not a mapped column");
                     }
+
+                    // TASK-248 — same marking as the per-property path above. Both resolution points must
+                    // set it or a composite-only index would leave its columns looking unindexed.
+                    field!.IsIndexed = true;
 
                     idx.Columns.Add(new IndexColumn
                     {

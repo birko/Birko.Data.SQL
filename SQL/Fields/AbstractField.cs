@@ -15,6 +15,20 @@ namespace Birko.Data.SQL.Fields
         public bool IsUnique { get; set; } = false;
         public bool IsNotNull { get; set; } = false;
         public bool IsAutoincrement { get; set; } = false;
+
+        /// <summary>
+        /// Whether any declared index names this column. Set by <c>DataBase.LoadIndexes</c> as it resolves
+        /// each index column back to its field, so it is populated before any DDL is emitted.
+        /// </summary>
+        /// <remarks>
+        /// TASK-248. Exists because one provider's column type has to depend on it: MySQL maps an unbounded
+        /// <c>string</c> to <c>LONGTEXT</c>, and <b>MySQL cannot index a BLOB/TEXT column without a key
+        /// length</b> (measured on 8.4 as ERROR 1170, for UNIQUE and plain alike). So on MySQL an indexed
+        /// string must become a bounded <c>VARCHAR</c> instead. The other three providers index a TEXT column
+        /// happily and ignore this flag — deliberately, since 7 live consumer entities declare exactly this
+        /// shape and work correctly there today.
+        /// </remarks>
+        public bool IsIndexed { get; set; } = false;
         public bool IsAggregate { get; set; } = false;
         public System.Reflection.PropertyInfo Property { get; set; } = null!;
         public Tables.Table Table { get; set; } = null!;

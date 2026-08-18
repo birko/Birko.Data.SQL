@@ -320,10 +320,19 @@ below).
   correctly, so no declared index could be dropped there either. Dropping an absent index on MySQL now
   **throws** (1091) where the base's `IF EXISTS` tolerated it: deliberate, because a `DropIndexes` caller
   named a specific index and the migrations drop step should fail loudly.
-- **Still broken on MySQL, tracked separately:** an index over an *unbounded* `string` (which maps to
-  `LONGTEXT`) fails with **1170** — MySQL cannot index a BLOB/TEXT column without a key length. Bounded
-  strings (`[MaxLengthField(n)]` → `VARCHAR(n)`) are fine. TASK-248; the boundary is pinned by a test that
-  asserts 1170, so it cannot move silently.
+- **An indexed unbounded `string` is bounded on MySQL, and only there** (TASK-248). MySQL maps a plain
+  `string` to `LONGTEXT` and cannot index a BLOB/TEXT column without a key length (**1170**), so
+  `MySQLConnector.ConvertType` emits `VARCHAR(255)` when `AbstractField.IsIndexed` is set. `IsIndexed` is
+  populated by `DataBase.LoadIndexes` at **both** of its column-resolution points — the per-property
+  `[IndexedField]` branch and the class-level `[CompositeIndex]` branch — and missing either leaves half the
+  declarations looking unindexed (reverting only the per-property one failed 0 tests until a test for that
+  attribute form existed).
+  SQLite, PostgreSQL and MSSql index TEXT natively and **ignore the flag deliberately**: seven live consumer
+  entities declare UNIQUE composites over unbounded strings and work correctly there, so bounding the column
+  everywhere would impose a 255-character ceiling on data that has none today. A prefix index was rejected in
+  turn — every real case is UNIQUE, and a prefix makes the constraint *weaker than declared*. Declaring
+  `[MaxLengthField(n)]` is still preferable to relying on the default: portable, visible at the model, and it
+  applies on every provider.
 - **`CreateIndexesAsync` has no production caller through stores.** `AsyncDataBaseStore.InitCoreAsync` calls
   the **sync** `Connector.CreateTable` inside a `Task.Run`, so an async store's schema-ensure runs the sync
   index loop. The async loop is reachable only via an explicit `CreateTableAsync`. Both are wired and tested
