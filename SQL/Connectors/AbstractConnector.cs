@@ -247,6 +247,103 @@ namespace Birko.Data.SQL.Connectors
             }
         }
 
+        /// <summary>
+        /// Runs a multi-statement bulk write on the ambient boundary when this flow is inside one, and on its
+        /// own connection and transaction when it is not. Synchronous twin of
+        /// <c>AbstractAsyncConnector.RunBulkAsync</c>.
+        /// </summary>
+        /// <param name="label">Command text used for retry logging and for <see cref="InitException"/>.</param>
+        /// <param name="body">
+        /// Receives the connection, the transaction, and whether it <b>owns</b> them. When it does not own
+        /// them it must not commit, roll back, or dispose either one — the boundary owner does that.
+        /// </param>
+        /// <param name="retryWhenOwned">
+        /// Whether the own-connection path is wrapped in <see cref="AbstractConnectorBase.ExecuteWithRetry"/>.
+        /// Each provider's shipped bulk path is preserved as it was: SQLite retries (CR-M144), PostgreSQL,
+        /// MySQL and MSSql never did. The participating path never retries whatever this says.
+        /// </param>
+        /// <remarks>
+        /// <b>Why the sync half matters just as much.</b> <c>DataBaseStore.EnterTransactionScope</c> publishes
+        /// a sync store's transaction context into <see cref="AmbientSqlTransaction"/> exactly as the async
+        /// store does, so sync single-row writes already honoured a boundary while sync bulk writes opened a
+        /// second connection and escaped it — the same asymmetry, on the same store.
+        /// <para>
+        /// <b>The participating path is deliberately NOT wrapped in <c>ExecuteWithRetry</c>.</b> A retry would
+        /// re-run statements inside a transaction whose earlier statements already succeeded, and on most
+        /// providers the first failure has already aborted it, so the retry can only fail differently.
+        /// Retrying is the boundary owner's decision — the same reasoning <see cref="RunCommandOn"/> already
+        /// applies to single commands.
+        /// </para>
+        /// <para>
+        /// The legacy <see cref="ExternalConnection"/>/<see cref="ExternalTransaction"/> pair is honoured
+        /// second, exactly as <see cref="DoCommand"/> does, so the two doors into "participate in somebody
+        /// else's transaction" cannot disagree for bulk writes when they already agree for single ones.
+        /// </para>
+        /// </remarks>
+        protected void RunBulk(
+            string label,
+            Action<DbConnection, DbTransaction, bool> body,
+            bool retryWhenOwned = true)
+        {
+            if (body == null) throw new ArgumentNullException(nameof(body));
+            // `transaction!` is provably non-null here: ownTransaction: true means the owned path begins one,
+            // and every participating path hands over an existing (never-null) transaction.
+            RunBulkCore(label, (connection, transaction, owned) => body(connection, transaction!, owned),
+                        ownTransaction: true, retryWhenOwned);
+        }
+
+        /// <summary>
+        /// The same decision as <see cref="RunBulk"/> for a bulk write that carries its <b>own</b> atomicity
+        /// and therefore wants a connection but no transaction of its own — PostgreSQL's binary <c>COPY</c>
+        /// and <c>SqlBulkCopy</c>. The body receives a null transaction when it owns the connection.
+        /// </summary>
+        protected void RunBulkOnConnection(
+            string label,
+            Action<DbConnection, DbTransaction?, bool> body,
+            bool retryWhenOwned = true)
+            => RunBulkCore(label, body, ownTransaction: false, retryWhenOwned);
+
+        private void RunBulkCore(
+            string label,
+            Action<DbConnection, DbTransaction?, bool> body,
+            bool ownTransaction,
+            bool retryWhenOwned)
+        {
+            if (body == null) throw new ArgumentNullException(nameof(body));
+
+            var ambient = AmbientTransaction;
+            if (ambient != null)
+            {
+                body(ambient.Connection, ambient.Transaction, false);
+                return;
+            }
+            if (ExternalConnection != null && ExternalTransaction != null)
+            {
+                body(ExternalConnection, ExternalTransaction, false);
+                return;
+            }
+
+            void Owned()
+            {
+                using var connection = CreateConnection(_settings);
+                connection.Open();
+                if (!ownTransaction)
+                {
+                    body(connection, null, true);
+                    return;
+                }
+                using var transaction = connection.BeginTransaction();
+                body(connection, transaction, true);
+            }
+
+            if (retryWhenOwned)
+            {
+                ExecuteWithRetry(Owned, label);
+                return;
+            }
+            Owned();
+        }
+
         private IEnumerable<IEnumerable<object>> RunReaderCommandWithExternalTransaction(DbConnection connection, DbTransaction transaction, Action<DbCommand> createCommand, Func<DbDataReader, IEnumerable<object>> transformFunction)
         {
             string? commandText = null;

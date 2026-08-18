@@ -25,6 +25,114 @@ namespace Birko.Data.SQL.Connectors
         {
         }
 
+        /// <summary>
+        /// Runs a multi-statement bulk write on the ambient boundary when this flow is inside one, and on its
+        /// own connection and transaction when it is not.
+        /// </summary>
+        /// <param name="label">Command text used for retry logging and for <c>InitException</c>.</param>
+        /// <param name="body">
+        /// Receives the connection, the transaction, and whether it <b>owns</b> them. When it does not own
+        /// them it must not commit, roll back, or dispose either one — the boundary owner does that.
+        /// </param>
+        /// <param name="ct">Cancellation token.</param>
+        /// <param name="retryWhenOwned">
+        /// Whether the <b>own-connection</b> path is wrapped in <see cref="AbstractConnectorBase.ExecuteWithRetryAsync"/>.
+        /// Each provider's shipped bulk path is preserved as it was: SQLite retries (CR-M144 — SQLITE_BUSY /
+        /// SQLITE_LOCKED are transient and the whole unit rolls back before the next attempt), PostgreSQL,
+        /// MySQL and MSSql never did, and this fix is not the place to start. The participating path never
+        /// retries whatever this says.
+        /// </param>
+        /// <remarks>
+        /// <b>Why this exists.</b> The bulk paths used to open their own connection and their own transaction
+        /// unconditionally, so a bulk write issued inside an <see cref="AmbientSqlTransaction"/> boundary
+        /// happened <i>outside</i> it. The symptom differed by provider, and the quiet one was the dangerous
+        /// one: on SQLite the second connection cannot take the write lock the boundary already holds, so it
+        /// blocked for the full command timeout and then failed; on PostgreSQL and MySQL two connections are
+        /// perfectly legal, so the bulk write committed independently and survived the owner's rollback with
+        /// no error anywhere. Every collection-shaped repository write routes here, so that was
+        /// create-many, update-many, delete-many, delete-where and delete-all silently escaping every
+        /// transaction boundary a caller drew.
+        /// <para>
+        /// <b>The participating path is deliberately NOT wrapped in <c>ExecuteWithRetryAsync</c>.</b> A retry
+        /// would re-run statements inside a transaction whose earlier statements already succeeded, and on
+        /// most providers the first failure has already aborted the transaction, so the retry can only fail
+        /// differently. Retrying is the boundary owner's decision, not this method's — the same reasoning
+        /// <c>RunCommandOnAsync</c> already applies to single commands.
+        /// </para>
+        /// </remarks>
+        protected Task RunBulkAsync(
+            string label,
+            Func<DbConnection, DbTransaction, bool, Task> body,
+            CancellationToken ct = default,
+            bool retryWhenOwned = true)
+        {
+            if (body == null) throw new ArgumentNullException(nameof(body));
+            // `transaction!` is provably non-null here: ownTransaction: true means the owned path begins one,
+            // and the participating path always hands over the boundary's own (never-null) transaction.
+            return RunBulkCoreAsync(label, (connection, transaction, owned) => body(connection, transaction!, owned),
+                                    ownTransaction: true, retryWhenOwned, ct);
+        }
+
+        /// <summary>
+        /// The same decision as <see cref="RunBulkAsync"/> for a bulk write that carries its <b>own</b>
+        /// atomicity and therefore wants a connection but no transaction of its own — PostgreSQL's binary
+        /// <c>COPY</c> and <c>SqlBulkCopy</c>.
+        /// </summary>
+        /// <remarks>
+        /// The body receives a <b>null</b> transaction when it owns the connection, and the boundary's
+        /// transaction when it does not. Both are still one producer for "am I inside a boundary": the two
+        /// public shapes differ only in what the owned path acquires, so a COPY-shaped path and a
+        /// statement-shaped path cannot disagree about what participating means.
+        /// <para>
+        /// Wrapping these in an owned transaction instead would have been the smaller diff and a real
+        /// behaviour change — <c>COPY</c> and <c>SqlBulkCopy</c> run unwrapped today, and this fix is about
+        /// the boundary, not about their standalone atomicity.
+        /// </para>
+        /// </remarks>
+        protected Task RunBulkOnConnectionAsync(
+            string label,
+            Func<DbConnection, DbTransaction?, bool, Task> body,
+            CancellationToken ct = default,
+            bool retryWhenOwned = true)
+            => RunBulkCoreAsync(label, body, ownTransaction: false, retryWhenOwned, ct);
+
+        private async Task RunBulkCoreAsync(
+            string label,
+            Func<DbConnection, DbTransaction?, bool, Task> body,
+            bool ownTransaction,
+            bool retryWhenOwned,
+            CancellationToken ct)
+        {
+            if (body == null) throw new ArgumentNullException(nameof(body));
+
+            var ambient = AmbientTransaction;
+            if (ambient != null)
+            {
+                await body(ambient.Connection, ambient.Transaction, false).ConfigureAwait(false);
+                return;
+            }
+
+            async Task Owned()
+            {
+                using var connection = CreateConnection(_settings);
+                await connection.OpenAsync(ct).ConfigureAwait(false);
+                if (!ownTransaction)
+                {
+                    await body(connection, null, true).ConfigureAwait(false);
+                    return;
+                }
+                using var transaction = connection.BeginTransaction();
+                await body(connection, transaction, true).ConfigureAwait(false);
+            }
+
+            if (retryWhenOwned)
+            {
+                await ExecuteWithRetryAsync(Owned, ct, label).ConfigureAwait(false);
+                return;
+            }
+            await Owned().ConfigureAwait(false);
+        }
+
         public virtual Task DoInitAsync(CancellationToken ct = default)
         {
             DoInit();
