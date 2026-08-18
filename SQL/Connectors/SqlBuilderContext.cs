@@ -61,7 +61,9 @@ namespace Birko.Data.SQL.Connectors
         {
             if (item is string str)
             {
-                return str.Replace("'", "''");
+                // TASK-253: one producer for the quote-doubling rule. This sink legitimately escapes
+                // rather than parameterises — see SqlLiteral for the two cases where that is true.
+                return SqlLiteral.EscapeLiteral(str);
             }
             return item;
         }

@@ -1319,7 +1319,7 @@ namespace Birko.Data.SQL
                 case bool b:
                     return b ? "1" : "0";
                 case string s:
-                    return "'" + s.Replace("'", "''") + "'";
+                    return "'" + SqlLiteral.EscapeLiteral(s) + "'";
                 case Enum e:
                     return Convert.ToInt64(e, System.Globalization.CultureInfo.InvariantCulture)
                         .ToString(System.Globalization.CultureInfo.InvariantCulture);

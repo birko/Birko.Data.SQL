@@ -179,8 +179,8 @@ namespace Birko.Data.SQL.IndexManagement
         /// </summary>
         protected virtual string IndexExistsSql(string tableName, string indexName)
         {
-            var safeIndex = indexName.Replace("'", "''");
-            var safeTable = tableName.Replace("'", "''");
+            var safeIndex = SqlLiteral.EscapeLiteral(indexName);
+            var safeTable = SqlLiteral.EscapeLiteral(tableName);
             return $"SELECT COUNT(*) FROM information_schema.statistics WHERE table_name = '{safeTable}' AND index_name = '{safeIndex}'";
         }
 
@@ -190,7 +190,7 @@ namespace Birko.Data.SQL.IndexManagement
         /// </summary>
         protected virtual string ListIndexesSql(string tableName)
         {
-            var safeTable = tableName.Replace("'", "''");
+            var safeTable = SqlLiteral.EscapeLiteral(tableName);
             return $@"SELECT index_name, column_name, 0 AS is_descending, CASE WHEN non_unique = 0 THEN 1 ELSE 0 END AS is_unique, seq_in_index AS ordinal_position
 FROM information_schema.statistics
 WHERE table_name = '{safeTable}'
