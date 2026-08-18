@@ -248,6 +248,61 @@ namespace Birko.Data.SQL.Connectors
         }
 
         /// <summary>
+        /// Runs one DDL statement — the funnel every schema emitter goes through, and the only place that
+        /// consults <see cref="AbstractConnectorBase.SupportsTransactionalDdl"/>.
+        /// </summary>
+        /// <remarks>
+        /// Identical to <see cref="DoCommandWithTransaction"/> on a provider with transactional DDL. Where
+        /// DDL is <b>not</b> transactional the statement is issued with the ambient boundary suppressed, so
+        /// it runs on a connection of its own and the caller's transaction is left intact.
+        /// <para>
+        /// <b>Why this is a funnel and not a fix at the store.</b> The defect (TASK-243) was found through
+        /// lazy schema-ensure, but nothing about it is specific to schema-ensure: on MySQL <i>any</i> DDL
+        /// reaching the boundary's connection implicitly commits it, so <c>CreateTable</c>, the index
+        /// emitters, <c>DropTable</c>, the two <c>ALTER</c>s and the view DDL are all the same defect
+        /// wearing different statements. Guarding the emitters instead of the caller means a new schema
+        /// emitter is correct without being told.
+        /// </para>
+        /// <para>
+        /// The legacy <see cref="ExternalConnection"/>/<see cref="ExternalTransaction"/> pair is
+        /// deliberately <b>not</b> suppressed: its only user is the migrations <c>SqlSchemaBuilder</c>,
+        /// which exists to run DDL in a transaction it owns and knows what its provider does with it.
+        /// Suppressing there would silently take a migration's statements out of its own unit of work.
+        /// </para>
+        /// </remarks>
+        /// <param name="createCommand">Builds the statement.</param>
+        /// <param name="executeCommand">Executes it.</param>
+        /// <param name="isLock">Passed through to the serialization gate, unchanged.</param>
+        /// <param name="inOwnTransaction">
+        /// Whether the statement runs in a transaction of its own (<see cref="DoCommandWithTransaction"/>)
+        /// or autocommitted (<see cref="DoCommand"/>). Each emitter passes what it already did — the base
+        /// <c>CreateTable</c> wraps, the provider overrides of it do not — because this change is about
+        /// <i>which connection</i> DDL runs on, not about giving it atomicity it never had. On a provider
+        /// with non-transactional DDL the wrapper transaction is a fiction anyway: the statement commits it
+        /// on the way in.
+        /// </param>
+        protected void DoDdlCommand(Action<DbCommand> createCommand, Action<DbCommand> executeCommand, bool isLock = false, bool inOwnTransaction = true)
+        {
+            if (SupportsTransactionalDdl)
+            {
+                RunDdl(createCommand, executeCommand, isLock, inOwnTransaction);
+                return;
+            }
+            using var _suppressed = AmbientSqlTransaction.Suppress();
+            RunDdl(createCommand, executeCommand, isLock, inOwnTransaction);
+        }
+
+        private void RunDdl(Action<DbCommand> createCommand, Action<DbCommand> executeCommand, bool isLock, bool inOwnTransaction)
+        {
+            if (inOwnTransaction)
+            {
+                DoCommandWithTransaction(createCommand, executeCommand, isLock);
+                return;
+            }
+            DoCommand(createCommand, executeCommand, isLock);
+        }
+
+        /// <summary>
         /// Runs a multi-statement bulk write on the ambient boundary when this flow is inside one, and on its
         /// own connection and transaction when it is not. Synchronous twin of
         /// <c>AbstractAsyncConnector.RunBulkAsync</c>.

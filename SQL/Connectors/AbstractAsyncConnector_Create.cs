@@ -65,7 +65,7 @@ namespace Birko.Data.SQL.Connectors
 
         public virtual async Task CreateTableAsync(string name, IEnumerable<string> fields, CancellationToken ct = default)
         {
-            await DoCommandWithTransactionAsync(async (command) =>
+            await DoDdlCommandAsync(async (command) =>
             {
                 command.CommandText = "CREATE TABLE IF NOT EXISTS "
                     + QuoteIdentifier(name)
@@ -83,7 +83,7 @@ namespace Birko.Data.SQL.Connectors
         {
             foreach (var index in indexes)
             {
-                await DoCommandWithTransactionAsync(async (command) =>
+                await DoDdlCommandAsync(async (command) =>
                 {
                     command.CommandText = CreateIndexSql(tableName, index);
                     await Task.CompletedTask;
@@ -98,7 +98,7 @@ namespace Birko.Data.SQL.Connectors
         {
             foreach (var index in indexes)
             {
-                await DoCommandWithTransactionAsync(async (command) =>
+                await DoDdlCommandAsync(async (command) =>
                 {
                     command.CommandText = DropIndexSql(tableName, index);
                     await Task.CompletedTask;

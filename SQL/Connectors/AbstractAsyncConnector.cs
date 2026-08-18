@@ -133,6 +133,31 @@ namespace Birko.Data.SQL.Connectors
             await Owned().ConfigureAwait(false);
         }
 
+        /// <summary>
+        /// Async twin of <c>AbstractConnector.DoDdlCommand</c> — see its remarks for why DDL is funnelled
+        /// rather than fixed at the caller, and why the legacy external-transaction pair is left alone.
+        /// </summary>
+        /// <remarks>
+        /// The suppression scope wraps the <c>await</c>, which is what makes it visible to the statement:
+        /// an <see cref="AsyncLocal{T}"/> write flows to callees. It cannot leak back to this method's
+        /// caller even if the scope were not disposed.
+        /// </remarks>
+        protected async Task DoDdlCommandAsync(Func<DbCommand, Task> createCommand, Func<DbCommand, Task> executeCommand, bool isLock = false, CancellationToken ct = default, bool inOwnTransaction = true)
+        {
+            if (SupportsTransactionalDdl)
+            {
+                await RunDdlAsync(createCommand, executeCommand, isLock, inOwnTransaction, ct).ConfigureAwait(false);
+                return;
+            }
+            using var _suppressed = AmbientSqlTransaction.Suppress();
+            await RunDdlAsync(createCommand, executeCommand, isLock, inOwnTransaction, ct).ConfigureAwait(false);
+        }
+
+        private Task RunDdlAsync(Func<DbCommand, Task> createCommand, Func<DbCommand, Task> executeCommand, bool isLock, bool inOwnTransaction, CancellationToken ct)
+            => inOwnTransaction
+                ? DoCommandWithTransactionAsync(createCommand, executeCommand, isLock, ct)
+                : DoCommandAsync(createCommand, executeCommand, isLock, ct);
+
         public virtual Task DoInitAsync(CancellationToken ct = default)
         {
             DoInit();

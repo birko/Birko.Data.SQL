@@ -27,7 +27,7 @@ namespace Birko.Data.SQL.Connectors
             {
                 foreach (var field in fields.Where(x => x != null))
                 {
-                    DoCommandWithTransaction((command) => {
+                    DoDdlCommand((command) => {
                         command.CommandText = "ALTER TABLE "
                             + QuoteIdentifier(tableName)
                             + " DROP COLUMN "

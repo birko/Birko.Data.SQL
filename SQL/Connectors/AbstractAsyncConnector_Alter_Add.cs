@@ -30,7 +30,7 @@ namespace Birko.Data.SQL.Connectors
             {
                 foreach (var field in fields.Where(x => x != null))
                 {
-                    await DoCommandWithTransactionAsync(async (command) =>
+                    await DoDdlCommandAsync(async (command) =>
                     {
                         command.CommandText = "ALTER TABLE "
                             + QuoteIdentifier(tableName)

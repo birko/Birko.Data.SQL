@@ -76,7 +76,7 @@ namespace Birko.Data.SQL.Connectors
 
         public virtual void CreateTable(string name, IEnumerable<string> fields)
         {
-            DoCommandWithTransaction((command) =>
+            DoDdlCommand((command) =>
             {
                 command.CommandText = "CREATE TABLE IF NOT EXISTS "
                     + QuoteIdentifier(name)
@@ -93,7 +93,7 @@ namespace Birko.Data.SQL.Connectors
         {
             foreach (var index in indexes)
             {
-                DoCommandWithTransaction((command) =>
+                DoDdlCommand((command) =>
                 {
                     command.CommandText = CreateIndexSql(tableName, index);
                 }, (command) =>
@@ -107,7 +107,7 @@ namespace Birko.Data.SQL.Connectors
         {
             foreach (var index in indexes)
             {
-                DoCommandWithTransaction((command) =>
+                DoDdlCommand((command) =>
                 {
                     command.CommandText = DropIndexSql(tableName, index);
                 }, (command) =>

@@ -162,6 +162,38 @@ namespace Birko.Data.SQL.Connectors
         }
 
         /// <summary>
+        /// Hides every boundary from the current flow for the lifetime of the returned handle, so work
+        /// done inside it runs on its own connection as though no boundary were open.
+        /// </summary>
+        /// <remarks>
+        /// <b>Not a general escape hatch.</b> The one sanctioned use is DDL on a provider whose DDL is not
+        /// transactional — see <see cref="AbstractConnectorBase.SupportsTransactionalDdl"/> and
+        /// <c>AbstractConnector.DoDdlCommand</c>. On MySQL a <c>CREATE TABLE</c> issued on the boundary's
+        /// own connection implicitly commits it, so the only way for the boundary to survive lazy
+        /// schema-ensure is for the DDL not to touch that connection (TASK-243). Anything else that
+        /// suppresses a boundary is escaping the boundary, which is the defect TASK-240 and TASK-242 exist
+        /// to remove.
+        /// <para>
+        /// Suppression is a <b>fresh cell with no head</b> rather than a marker on the entry, so it hides
+        /// the whole chain — including boundaries against other databases — and restores exactly what was
+        /// there on dispose. It does not end, commit or roll back anything: the owner still holds its
+        /// connection and transaction throughout.
+        /// </para>
+        /// <para>
+        /// Safe from an <c>async</c> method as long as the suppressed work is awaited <i>inside</i> the
+        /// scope: an <see cref="AsyncLocal{T}"/> write flows to callees but never back to the caller, so
+        /// the worst an async caller can suffer is the suppression ending early on return — never leaking
+        /// out. See <see cref="InstallCell"/> for the same mechanic stated from the other direction.
+        /// </para>
+        /// </remarks>
+        public static IDisposable Suppress()
+        {
+            var previous = _cell.Value;
+            _cell.Value = new Cell();
+            return new CellScope(previous);
+        }
+
+        /// <summary>
         /// Enters a boundary for the current flow. Dispose the returned handle to leave it.
         /// </summary>
         /// <remarks>

@@ -30,7 +30,7 @@ namespace Birko.Data.SQL.Connectors
             {
                 foreach (var tableName in tables.Where(x => !string.IsNullOrEmpty(x)))
                 {
-                    await DoCommandWithTransactionAsync(async (command) =>
+                    await DoDdlCommandAsync(async (command) =>
                     {
                         command.CommandText = "DROP TABLE IF EXISTS " + QuoteIdentifier(tableName);
                         await Task.CompletedTask;

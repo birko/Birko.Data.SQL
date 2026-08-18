@@ -32,6 +32,33 @@ namespace Birko.Data.SQL.Connectors
         public RetryPolicy RetryPolicy { get; set; } = RetryPolicy.None;
 
         /// <summary>
+        /// Whether this provider's DDL can run inside a transaction without ending it. True for every
+        /// provider that has transactional DDL; <b>false for MySQL and MariaDB</b>, which implicitly
+        /// commit an open transaction on any DDL statement.
+        /// </summary>
+        /// <remarks>
+        /// A provider capability in the same family as <see cref="IsTransientException"/> and
+        /// <see cref="IsMissingTableException"/>: stated once, consulted by the one place that needs it
+        /// (<c>AbstractConnector.DoDdlCommand</c>), never re-derived per call site.
+        /// <para>
+        /// <b>Why it exists.</b> Stores initialise lazily, so a store's first data access issues
+        /// <c>CREATE TABLE IF NOT EXISTS</c> — and after TASK-240 that DDL runs on the ambient boundary's
+        /// connection. On MySQL that silently committed the caller's transaction before their own write
+        /// even ran, so the later rollback undid nothing (TASK-243). Where this is false, DDL is
+        /// deliberately issued <i>off</i> the boundary instead.
+        /// </para>
+        /// <para>
+        /// The two halves of the trade land on opposite providers, which is what makes the switch safe:
+        /// SQLite <b>needs</b> DDL on the boundary's connection (a second connection cannot take the write
+        /// lock the boundary holds and blocks for the whole busy timeout), and MySQL needs it off. Measured
+        /// on MySQL 8.4: an open transaction holding a row lock on a table does <b>not</b> block a
+        /// concurrent <c>CREATE TABLE IF NOT EXISTS</c> on that same table (17 ms), so the second
+        /// connection this implies is not a metadata-lock hazard.
+        /// </para>
+        /// </remarks>
+        public virtual bool SupportsTransactionalDdl => true;
+
+        /// <summary>
         /// Determines whether an exception is transient and the operation should be retried.
         /// Override in provider-specific connectors to detect provider-specific transient errors
         /// (e.g., SQL Server error 1205 for deadlocks, PostgreSQL 40P01, MySQL 1213).
