@@ -51,6 +51,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)SQL\DataBase_OrderBy.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\DataBase_RuleField.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\DataBase_Table.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\SqlLiteral.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Fields\AbstractField.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Fields\BinaryField.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Fields\BooleanField.cs" />

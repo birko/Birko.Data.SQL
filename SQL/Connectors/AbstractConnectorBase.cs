@@ -59,6 +59,32 @@ namespace Birko.Data.SQL.Connectors
         public virtual bool SupportsTransactionalDdl => true;
 
         /// <summary>
+        /// Whether this provider case-folds an identifier that was emitted <b>unquoted</b>. True for
+        /// PostgreSQL (and therefore TimescaleDB), which folds to lower case; false for SQLite, MySQL and
+        /// MSSql, which preserve the spelling they were given.
+        /// </summary>
+        /// <remarks>
+        /// A provider capability in the same family as <see cref="SupportsTransactionalDdl"/> and
+        /// <see cref="IsMissingTableException"/>: stated once, consulted by the one producer that needs it
+        /// (<see cref="CatalogueNameLiteral"/>), never re-derived per call site.
+        /// <para>
+        /// <b>Why the framework has to know.</b> <c>AbstractConnector.CreateTable</c> quotes the table name
+        /// and emits column definitions <b>bare</b> (§ Conventions, TASK-209), so on a folding provider the
+        /// stored column name is folded while the table keeps its spelling. Everywhere an identifier is
+        /// emitted <i>as an identifier</i> that asymmetry takes care of itself — the parser folds the
+        /// reference the same way it folded the definition. It only becomes visible where a name travels as
+        /// a string <b>value</b> instead, because the parser never sees an identifier there and never folds
+        /// it: the name has to arrive already folded or it will not match <c>pg_attribute.attname</c>.
+        /// </para>
+        /// <para>
+        /// Consequence worth stating: a table whose column was created <i>quoted</i> and mixed-case is not
+        /// addressable through <see cref="CatalogueNameLiteral"/>. That is deliberate — this framework never
+        /// quotes a column definition, so it cannot produce such a table.
+        /// </para>
+        /// </remarks>
+        public virtual bool FoldsUnquotedIdentifiers => false;
+
+        /// <summary>
         /// Determines whether an exception is transient and the operation should be retried.
         /// Override in provider-specific connectors to detect provider-specific transient errors
         /// (e.g., SQL Server error 1205 for deadlocks, PostgreSQL 40P01, MySQL 1213).
@@ -212,6 +238,63 @@ namespace Birko.Data.SQL.Connectors
         {
             return "\"" + identifier.Replace("\"", "\"\"") + "\"";
         }
+
+        /// <summary>
+        /// Renders <paramref name="name"/> as a table reference that will be read back out of a
+        /// single-quoted SQL literal — e.g. PostgreSQL's <c>regclass</c> arguments. Returns the inner text
+        /// only; the caller supplies the surrounding quotes.
+        /// </summary>
+        /// <remarks>
+        /// <b>Quote as an identifier, then escape for the literal — and the two commute.</b> Neither step can
+        /// introduce the other's metacharacter: <see cref="QuoteIdentifier"/> emits and doubles only the
+        /// identifier quote, <see cref="SqlLiteral.EscapeLiteral"/> doubles only <c>'</c>. So either order
+        /// produces the same string, and a caller does not have to get it right.
+        /// <para>
+        /// That commutativity is <b>measured, not assumed</b>: swapping the two here fails 0 of 555 tests
+        /// (TASK-253). It is recorded because the obvious comment to write — "this order is the safe one" —
+        /// would be false, and a future reader who "fixes" the order should know nothing depends on it. What
+        /// does need pinning is that <i>both</i> quote kinds get doubled, which
+        /// <c>RegclassLiteral_EscapesBothQuoteKinds</c> covers.
+        /// </para>
+        /// <para>
+        /// <b>Why the quotes are needed at all.</b> A regclass argument is parsed as an identifier
+        /// <i>after</i> the literal is unwrapped, so on a folding provider a bare <c>'Widgets'</c> resolves
+        /// to <c>widgets</c> while <c>AbstractConnector.CreateTable</c> created <c>"Widgets"</c> — a missing
+        /// relation. TASK-472 measured that on TimescaleDB 2: <c>create_hypertable</c> raised <c>42P01</c>,
+        /// <c>IsMissingTableException</c> classified it as a missing table, the handler swallowed it, and
+        /// <b>no hypertable existed for any PascalCase entity</b> while a plain table served reads and writes.
+        /// </para>
+        /// <para>
+        /// Contrast <see cref="CatalogueNameLiteral"/>, which needs the opposite treatment for a name that is
+        /// compared against a catalogue column rather than re-parsed as an identifier. Two arguments of one
+        /// function can need one each, so read both before choosing.
+        /// </para>
+        /// </remarks>
+        public string RegclassLiteral(string name)
+            => SqlLiteral.EscapeLiteral(QuoteIdentifier(name));
+
+        /// <summary>
+        /// Renders <paramref name="name"/> as a bare object name that will be read back out of a
+        /// single-quoted SQL literal and compared <b>literally</b> against a catalogue column — PostgreSQL's
+        /// <c>name</c> arguments, matched against <c>pg_attribute.attname</c> and friends. Returns the inner
+        /// text only; the caller supplies the surrounding quotes.
+        /// </summary>
+        /// <remarks>
+        /// <b>Pre-folds when the provider folds, which is the opposite of quoting.</b> The parser never sees
+        /// an identifier here — the text is compared as data — so the folding that makes an ordinary
+        /// identifier reference resolve does not happen, and the name must arrive in the form the catalogue
+        /// stores. On PostgreSQL that is folded, because column definitions are emitted bare
+        /// (<see cref="FoldsUnquotedIdentifiers"/>).
+        /// <para>
+        /// Adding quotes here instead would be actively wrong: the comparison is textual, so
+        /// <c>'"Ts"'</c> would be looked up with its quotes included and match nothing. TASK-472 measured the
+        /// unfolded form as <c>42703 column "Ts" does not exist</c> — the loud half of that defect, hidden
+        /// only because the shipped default time column was already lower case and matched a folded property
+        /// by luck.
+        /// </para>
+        /// </remarks>
+        public string CatalogueNameLiteral(string name)
+            => SqlLiteral.EscapeLiteral(FoldsUnquotedIdentifiers ? name.ToLowerInvariant() : name);
 
         /// <summary>
         /// Converts a CLR value into the form the storage layer actually persists, before it is bound
