@@ -110,6 +110,8 @@ namespace Birko.Data.SQL.Fields
             int? scale = null;
             int? precision = null;
             int? maxLength = null;
+            // TASK-263: switches a DateTime property from a wall clock to an instant. See Attributes.UtcField.
+            bool utc = false;
 
             // Read Birko.Data.SQL.Attributes
             if (fields != null && fields.Any())
@@ -148,6 +150,10 @@ namespace Birko.Data.SQL.Fields
                     if (field is Birko.Data.SQL.Attributes.ScaleField scaleField)
                     {
                         scale = scaleField.Scale;
+                    }
+                    if (field is Birko.Data.SQL.Attributes.UtcField)
+                    {
+                        utc = true;
                     }
                 }
             }
@@ -200,6 +206,28 @@ namespace Birko.Data.SQL.Fields
             // [RequiredField] overrides C# nullability — forces NOT NULL even for nullable types
             var effectiveNotNull = !isNullable || required;
 
+            // ---------------------------------------------------------------------------------------------
+            // Which DbTypes a model can actually reach (TASK-263, criterion 4).
+            //
+            // This dispatch is the ONLY producer of fields, and no attribute can override a field's DbType, so
+            // the set of DbTypes reachable from a model is exactly the set the arms below construct. Three
+            // temporal DbTypes that ConvertType still answers are therefore unreachable BY DESIGN, and are
+            // recorded here so a later reader can tell a decision from an oversight:
+            //
+            //   DbType.Date  -- a DateTime property is a full timestamp; truncating it to a date at the storage
+            //                   layer would silently discard the time component. CR-H086 fixed exactly that bug
+            //                   on MSSql, where DbType.DateTime had been mapped to DATE.
+            //   DbType.Time  -- TimeOnly deliberately maps to DbType.String instead; see TimeOnlyField for why
+            //                   (AbstractConnectorBase maps DbType.Time to typeof(DateTime), and SQLite has no
+            //                   time type at all).
+            //   DbType.DateTimeOffset -- reachable since TASK-263, but ONLY via [UtcField] on a DateTime
+            //                   property, never from a DateTimeOffset CLR property. There is no DateTimeOffset
+            //                   arm and that is deliberate: the offset cannot survive on MySQL or SQLite, so a
+            //                   DateTimeOffset property would advertise something two of four providers cannot
+            //                   honour. See Attributes.UtcField.
+            //
+            // ConvertType keeps answering all three because it is public surface a consumer may call directly.
+            // ---------------------------------------------------------------------------------------------
             if (property.PropertyType == typeof(bool) || property.PropertyType == typeof(bool?))
             {
                 return (effectiveNotNull)
@@ -208,9 +236,32 @@ namespace Birko.Data.SQL.Fields
             }
             if (property.PropertyType == typeof(DateTime) || property.PropertyType == typeof(DateTime?))
             {
+                // TASK-263: two meanings, one CLR type. Plain is a wall clock (TASK-256's rule); [UtcField] is
+                // an instant, stored in the provider's timezone-aware column and read back as Kind=Utc. They
+                // coexist per property on the same entity.
+                if (utc)
+                {
+                    return (effectiveNotNull)
+                            ? (AbstractField)new UtcDateTimeField(property, name, primary, unique)
+                            : (AbstractField)new NullableUtcDateTimeField(property, name, primary, unique);
+                }
                 return (effectiveNotNull)
                         ? (AbstractField)new DateTimeField(property, name, primary, unique)
                         : (AbstractField)new NullableDateTimeField(property, name, primary, unique);
+            }
+
+            // TASK-263 / SH-H037: [UtcField] on anything else is refused rather than ignored. Silently
+            // dropping it would leave the model declaring an instant while the column stored whatever that
+            // type maps to -- the model and the storage disagreeing with nothing to notice. Checked here,
+            // after the DateTime arm has consumed the legitimate case, and before the remaining arms.
+            if (utc)
+            {
+                throw new Exceptions.FieldAttributeException(
+                    "[UtcField] is only valid on a DateTime or DateTime? property. "
+                  + property.DeclaringType?.FullName + "." + property.Name + " is "
+                  + property.PropertyType.FullName
+                  + ". Remove the attribute, or change the property to DateTime -- a plain DateTime column "
+                  + "stores a wall clock, a [UtcField] one stores an instant.");
             }
 
             // SH-H037 (TASK-197) / Symbio TASK-361 — TimeOnly was one more BCL value type with no arm here. While an

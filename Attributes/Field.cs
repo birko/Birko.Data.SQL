@@ -140,4 +140,45 @@ namespace Birko.Data.SQL.Attributes
             Properties = properties ?? System.Array.Empty<string>();
         }
     }
+
+    /// <summary>
+    /// Declares that a <see cref="System.DateTime"/> property holds an <b>instant</b>, not a wall clock, and
+    /// must be stored in the provider's timezone-aware column type.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The two rules, and why both exist (TASK-256, TASK-263).</b> A plain Birko <c>DateTime</c> column is a
+    /// <i>wall clock</i>: it stores the value's date and time components as supplied, <c>DateTimeKind</c> is not
+    /// persisted, and every read returns <c>Unspecified</c>. That is correct for a local calendar date — a
+    /// notice date, an opening time — but it cannot say <i>which instant</i> a timestamp names. Marking the
+    /// property <c>[UtcField]</c> switches it to the other meaning: the value is normalised to UTC on write,
+    /// stored in <c>TIMESTAMPTZ</c> / <c>DATETIMEOFFSET</c> where the provider has one, and read back as
+    /// <c>DateTimeKind.Utc</c>. The two coexist per property on the same entity.
+    /// </para>
+    /// <para>
+    /// <b>What it does NOT promise: your original offset.</b> A caller's offset is normalised away on every
+    /// provider, deliberately. MySQL's <c>DATETIME</c> and SQLite's numeric affinity cannot carry one, and a
+    /// field cannot behave differently per provider — <c>Tables.Table</c> holds no connector and
+    /// <c>AbstractField.Read</c> is reached through the provider-blind <c>DataBase.Read</c>. So the promise is
+    /// uniform across all four providers and deliberately narrower than the column type suggests: the
+    /// <b>instant is exact</b>, and it reads back as UTC. This is why the opt-in is an attribute on a
+    /// <c>DateTime</c> rather than a <c>DateTimeOffset</c> property — a <c>DateTimeOffset</c> would advertise
+    /// an offset that cannot survive on half the supported providers.
+    /// </para>
+    /// <para>
+    /// <b>A value with no <c>Kind</c> is read as UTC</b>, not as local: the attribute is a declaration that the
+    /// property holds UTC, so <c>Unspecified</c> is taken at its word. <c>Local</c> is converted.
+    /// </para>
+    /// <para>
+    /// Applying this to a non-<c>DateTime</c> property throws <c>FieldAttributeException</c> at table load. An
+    /// attribute that silently did nothing would leave the model claiming an instant while the column stored a
+    /// wall clock — the § SH-H037 shape.
+    /// </para>
+    /// </remarks>
+    [System.AttributeUsage(System.AttributeTargets.Property, Inherited = true, AllowMultiple = false)]
+    public class UtcField : Field
+    {
+        public UtcField() : base() { }
+    }
+
 }

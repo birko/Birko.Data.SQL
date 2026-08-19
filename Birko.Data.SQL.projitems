@@ -66,6 +66,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Fields\CharField.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Fields\StringField.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Fields\TimeOnlyField.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)SQL\Fields\UtcDateTimeField.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Tables\Table.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SQL\Tables\IndexDefinition.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Exceptions\FieldAttributeException.cs" />
