@@ -24,11 +24,49 @@ namespace Birko.Data.SQL.Fields
         /// TASK-248. Exists because one provider's column type has to depend on it: MySQL maps an unbounded
         /// <c>string</c> to <c>LONGTEXT</c>, and <b>MySQL cannot index a BLOB/TEXT column without a key
         /// length</b> (measured on 8.4 as ERROR 1170, for UNIQUE and plain alike). So on MySQL an indexed
-        /// string must become a bounded <c>VARCHAR</c> instead. The other three providers index a TEXT column
-        /// happily and ignore this flag — deliberately, since 7 live consumer entities declare exactly this
-        /// shape and work correctly there today.
+        /// string must become a bounded <c>VARCHAR</c> instead.
+        /// <para>
+        /// <b>Covers only <c>[IndexedField]</c> and <c>[CompositeIndex]</c></b>, because those are what
+        /// <c>LoadIndexes</c> resolves. A <c>UNIQUE</c> or <c>PRIMARY KEY</c> column is equally an index key
+        /// and is <i>not</i> marked here — see <see cref="IsInIndexKey"/>, which is what a provider with a
+        /// restricted key type should consult.
+        /// </para>
+        /// <para>
+        /// TASK-257 corrected the claim that once stood here, that "the other three providers index a TEXT
+        /// column happily and ignore this flag". <b>MSSql cannot</b>: it emitted <c>TEXT</c> for an unbounded
+        /// string, and SQL Server refuses that as an index key (measured on 2022 as Msg 1919). PostgreSQL
+        /// (btree over <c>TEXT</c>) and SQLite (type affinity) genuinely do index it happily and genuinely do
+        /// ignore this flag.
+        /// </para>
         /// </remarks>
         public bool IsIndexed { get; set; } = false;
+
+        /// <summary>
+        /// Any declared index, <c>UNIQUE</c> or <c>PRIMARY KEY</c> names this column — i.e. it is an index
+        /// <b>key</b>, so a provider whose key types are restricted must bound it.
+        /// </summary>
+        /// <remarks>
+        /// TASK-257. Wider than <see cref="IsIndexed"/>, and the difference is load-bearing:
+        /// <c>FieldDefinition</c> emits <c>UNIQUE</c> and <c>PRIMARY KEY</c> as <b>inline column
+        /// constraints</b> on all four providers, while <c>DataBase.LoadIndexes</c> marks only the columns
+        /// named by <c>[IndexedField]</c> / <c>[CompositeIndex]</c>. So a <c>[UniqueField] public string
+        /// Code</c> is an index key that <see cref="IsIndexed"/> reports as <c>false</c> — and on SQL Server
+        /// that made the whole <c>CREATE TABLE</c> fail, not merely the index (measured on 2022: an inline
+        /// <c>UNIQUE</c> over <c>TEXT</c> <i>and</i> over <c>NVARCHAR(MAX)</c> both raise Msg 1919).
+        /// <para>
+        /// Read by <c>MSSqlConnector.ConvertType</c> only. <b>MySQL deliberately still reads the narrower
+        /// <see cref="IsIndexed"/></b>: it has the identical hole (<c>LONGTEXT UNIQUE</c> is ERROR 1170), but
+        /// closing it changes DDL on a provider TASK-257 did not measure, so that is its own task. Do not
+        /// "unify" the two from symmetry — the asymmetry is a recorded decision, and it has a test.
+        /// </para>
+        /// <para>
+        /// A computed property rather than an OR at the connector, so "this column is an index key" has one
+        /// producer. Two providers need the answer and a third spelling of it is how a rule gets got wrong
+        /// again.
+        /// </para>
+        /// </remarks>
+        public bool IsInIndexKey => IsIndexed || IsUnique || IsPrimary;
+
         public bool IsAggregate { get; set; } = false;
         public System.Reflection.PropertyInfo Property { get; set; } = null!;
         public Tables.Table Table { get; set; } = null!;
