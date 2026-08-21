@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.Common;
@@ -271,7 +271,137 @@ namespace Birko.Data.SQL.Connectors
         /// </para>
         /// </remarks>
         public string RegclassLiteral(string name)
-            => SqlLiteral.EscapeLiteral(QuoteIdentifier(name));
+            => SqlLiteral.EscapeLiteral(QualifiedIdentifier(name));
+
+        /// <summary>
+        /// The opening and closing delimiters <see cref="QuoteIdentifier"/> emits. Override together with it.
+        /// </summary>
+        /// <remarks>
+        /// Exposed so <see cref="QualifiedIdentifier"/> can tell a separator dot from a dot inside a quoted
+        /// name without re-deriving each provider's quoting. ANSI double quotes by default (PostgreSQL,
+        /// SQLite); MSSql overrides to <c>[</c>/<c>]</c> and MySQL to backticks. A provider that overrides
+        /// <see cref="QuoteIdentifier"/> with a different delimiter and forgets these gets a scanner that
+        /// cannot see its quotes — so change them in the same edit.
+        /// </remarks>
+        protected virtual char IdentifierQuoteOpen => '"';
+
+        /// <inheritdoc cref="IdentifierQuoteOpen"/>
+        protected virtual char IdentifierQuoteClose => '"';
+
+        /// <summary>
+        /// Renders <paramref name="name"/> as a possibly <b>qualified</b> object reference — each
+        /// dot-separated part quoted independently, e.g. <c>reporting.evts</c> to
+        /// <c>"reporting"."evts"</c>.
+        /// </summary>
+        /// <remarks>
+        /// <b>Why this is not <see cref="QuoteIdentifier"/>.</b> That method quotes its whole argument as ONE
+        /// identifier, which is right for a column and for a table name taken from <c>Table.Name</c> — those
+        /// are never qualified. Where the name comes from a <i>caller</i> who may qualify it, quoting the whole
+        /// string asks for one object whose name literally contains a period. Measured on TimescaleDB 2.29.2 /
+        /// PostgreSQL 16.15 (TASK-262):
+        /// <code>
+        /// create_hypertable('reporting.evts','ts')        -- works
+        /// create_hypertable('"reporting.evts2"','ts')     -- 42P01 relation "reporting.evts2" does not exist
+        /// create_hypertable('"reporting"."evts3"','ts')   -- works
+        /// </code>
+        /// <para>
+        /// <b>Strictly more capable than emitting the name bare</b>, which is what preceded TASK-253: a bare
+        /// qualified name resolves, but a bare <i>mixed-case</i> or spaced part does not. Per-part quoting
+        /// handles both — measured, <c>'"reporting"."Evts4"'</c> and <c>'"Rep Ort"."Ev ts"'</c> each created a
+        /// hypertable.
+        /// </para>
+        /// <para>
+        /// <b>Only UNQUOTED dots separate.</b> A part the caller already delimited is taken as one name, so a
+        /// table genuinely called <c>a.b</c> stays addressable as <c>"a.b"</c> — that is the escape hatch for
+        /// the one case splitting gives up, and it is why the split is on unquoted dots rather than on every
+        /// dot. Measured blast radius of the trade: 0 of 317 <c>[Table("…")]</c> declarations across the
+        /// framework, its tests and all 16 consumer repos contain a dot.
+        /// </para>
+        /// <para>
+        /// <b>Unqualified input is unchanged</b>, which is what keeps TASK-472 intact: <c>Widgets</c> has no
+        /// dot, so it is one part and emerges as <c>"Widgets"</c> exactly as before. The store path passes
+        /// <c>Table.Name</c> and is unaffected.
+        /// </para>
+        /// <para>
+        /// Escaping is preserved end to end: a part is unwrapped, its doubled delimiters collapsed, then
+        /// re-quoted through <see cref="QuoteIdentifier"/>, so an embedded delimiter is re-doubled rather than
+        /// passed through. <see cref="RegclassLiteral"/> then escapes the result for the surrounding literal.
+        /// </para>
+        /// </remarks>
+        public string QualifiedIdentifier(string name)
+        {
+            if (string.IsNullOrEmpty(name))
+            {
+                return QuoteIdentifier(name);
+            }
+
+            var open = IdentifierQuoteOpen;
+            var close = IdentifierQuoteClose;
+
+            var parts = new List<string>();
+            var current = new StringBuilder();
+            var inQuotes = false;
+
+            for (var i = 0; i < name.Length; i++)
+            {
+                var c = name[i];
+
+                if (!inQuotes && c == open)
+                {
+                    inQuotes = true;
+                    current.Append(c);
+                    continue;
+                }
+
+                if (inQuotes && c == close)
+                {
+                    // A doubled closing delimiter is an escaped literal one, not the end of the part.
+                    if (i + 1 < name.Length && name[i + 1] == close)
+                    {
+                        current.Append(c).Append(c);
+                        i++;
+                        continue;
+                    }
+                    inQuotes = false;
+                    current.Append(c);
+                    continue;
+                }
+
+                if (c == '.' && !inQuotes)
+                {
+                    parts.Add(current.ToString());
+                    current.Clear();
+                    continue;
+                }
+
+                current.Append(c);
+            }
+
+            parts.Add(current.ToString());
+
+            for (var i = 0; i < parts.Count; i++)
+            {
+                parts[i] = QuoteIdentifier(UnwrapIdentifier(parts[i], open, close));
+            }
+
+            return string.Join(".", parts);
+        }
+
+        /// <summary>
+        /// Strips one layer of delimiters from an already-quoted part and collapses its doubled closing
+        /// delimiters, so the result can be re-quoted through <see cref="QuoteIdentifier"/> without gaining a
+        /// second layer.
+        /// </summary>
+        private static string UnwrapIdentifier(string part, char open, char close)
+        {
+            if (part.Length < 2 || part[0] != open || part[part.Length - 1] != close)
+            {
+                return part;
+            }
+
+            return part.Substring(1, part.Length - 2).Replace(
+                new string(close, 2), close.ToString());
+        }
 
         /// <summary>
         /// Renders <paramref name="name"/> as a bare object name that will be read back out of a
