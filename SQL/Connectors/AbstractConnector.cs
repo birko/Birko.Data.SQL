@@ -167,8 +167,7 @@ namespace Birko.Data.SQL.Connectors
         /// The ambient transaction boundary covering THIS connector's database, or null.
         /// </summary>
         /// <remarks>
-        /// Checked before <see cref="ExternalConnection"/> because it is the more specific answer, and
-        /// before the serialization gate because a command joining a caller's own connection needs no
+        /// Checked before the serialization gate because a command joining a caller's own connection needs no
         /// mutual exclusion against commands on other connections — taking the gate there is how a
         /// boundary holder and the gate holder would deadlock on each other.
         /// </remarks>
@@ -181,11 +180,6 @@ namespace Birko.Data.SQL.Connectors
             if (ambient != null)
             {
                 RunCommandOn(ambient.Connection, ambient.Transaction, createCommand, executeCommand);
-                return;
-            }
-            if (ExternalConnection != null && ExternalTransaction != null)
-            {
-                RunCommandWithExternalTransaction(createCommand, executeCommand);
                 return;
             }
             if (!isLock)
@@ -201,22 +195,24 @@ namespace Birko.Data.SQL.Connectors
             }
         }
 
-        /// <summary>
-        /// External transaction context. When set, DoCommandWithTransaction and DoCommand
-        /// use this connection/transaction instead of creating their own.
-        /// </summary>
-        public DbConnection? ExternalConnection { get; private set; }
-        public DbTransaction? ExternalTransaction { get; private set; }
-
-        /// <summary>
-        /// Sets or clears the external transaction context.
-        /// When set, all operations participate in this transaction.
-        /// </summary>
-        public void SetExternalTransaction(DbConnection? connection, DbTransaction? transaction)
-        {
-            ExternalConnection = connection;
-            ExternalTransaction = transaction;
-        }
+        // TASK-259 deleted the ExternalConnection/ExternalTransaction pair and its SetExternalTransaction
+        // setter that used to live here. They were this framework's first answer to "run the connector's own
+        // SQL inside a transaction the caller owns", and the answer was stored in the wrong place: connectors
+        // are cached process-wide per (type, settings id) by DataBase.GetConnector, so a per-caller,
+        // per-operation fact became shared, long-lived state. Concurrent callers saw each other's
+        // transaction, and a caller that finished without clearing it left a disposed connection behind for
+        // everyone — measured on SQLite as a store whose lazy schema-ensure threw and which then stayed
+        // permanently uninitialised.
+        //
+        // AmbientSqlTransaction (TASK-240) is the replacement and the only mechanism now: it lives in an
+        // AsyncLocal cell, is keyed by settings id, nests as a stack and restores on dispose, so a boundary
+        // cannot outlive the flow that entered it. Both stores moved to it then; SqlSchemaBuilder was the
+        // last holdout and moved in TASK-259, which left this pair with zero callers.
+        //
+        // Deleted rather than left in place (TASK-247's rule: a mechanism nobody can reach is not a safety
+        // net, it is a second implementation that drifts) after measuring 0 uses across all 16 consumer
+        // repos. Do not reintroduce it: putting per-operation state on a cached connector is the defect, not
+        // the spelling.
 
         public virtual void DoCommandWithTransaction(Action<DbCommand> createCommand, Action<DbCommand> executeCommand, bool isLock = false)
         {
@@ -227,11 +223,6 @@ namespace Birko.Data.SQL.Connectors
             if (ambient != null)
             {
                 RunCommandOn(ambient.Connection, ambient.Transaction, createCommand, executeCommand);
-                return;
-            }
-            if (ExternalConnection != null && ExternalTransaction != null)
-            {
-                RunCommandWithExternalTransaction(createCommand, executeCommand);
                 return;
             }
             if (!isLock)
@@ -264,10 +255,10 @@ namespace Birko.Data.SQL.Connectors
         /// emitter is correct without being told.
         /// </para>
         /// <para>
-        /// The legacy <see cref="ExternalConnection"/>/<see cref="ExternalTransaction"/> pair is
-        /// deliberately <b>not</b> suppressed: its only user is the migrations <c>SqlSchemaBuilder</c>,
-        /// which exists to run DDL in a transaction it owns and knows what its provider does with it.
-        /// Suppressing there would silently take a migration's statements out of its own unit of work.
+        /// There is nothing else to suppress. The legacy ExternalConnection/ExternalTransaction pair that
+        /// this paragraph used to carve out was deleted in TASK-259 once <c>SqlSchemaBuilder</c> — its last
+        /// caller — moved onto <see cref="AmbientSqlTransaction"/>, so a migration's DDL is now an ambient
+        /// boundary like any other and is suppressed here on exactly the same terms.
         /// </para>
         /// </remarks>
         /// <param name="createCommand">Builds the statement.</param>
@@ -330,9 +321,9 @@ namespace Birko.Data.SQL.Connectors
         /// applies to single commands.
         /// </para>
         /// <para>
-        /// The legacy <see cref="ExternalConnection"/>/<see cref="ExternalTransaction"/> pair is honoured
-        /// second, exactly as <see cref="DoCommand"/> does, so the two doors into "participate in somebody
-        /// else's transaction" cannot disagree for bulk writes when they already agree for single ones.
+        /// There is now exactly <b>one</b> door into "participate in somebody else's transaction", so the
+        /// two-doors-must-agree paragraph that stood here is moot: TASK-259 deleted the legacy
+        /// ExternalConnection/ExternalTransaction pair after its last caller moved to the ambient.
         /// </para>
         /// </remarks>
         protected void RunBulk(
@@ -372,11 +363,6 @@ namespace Birko.Data.SQL.Connectors
                 body(ambient.Connection, ambient.Transaction, false);
                 return;
             }
-            if (ExternalConnection != null && ExternalTransaction != null)
-            {
-                body(ExternalConnection, ExternalTransaction, false);
-                return;
-            }
 
             void Owned()
             {
@@ -399,7 +385,7 @@ namespace Birko.Data.SQL.Connectors
             Owned();
         }
 
-        private IEnumerable<IEnumerable<object>> RunReaderCommandWithExternalTransaction(DbConnection connection, DbTransaction transaction, Action<DbCommand> createCommand, Func<DbDataReader, IEnumerable<object>> transformFunction)
+        private IEnumerable<IEnumerable<object>> RunReaderCommandOn(DbConnection connection, DbTransaction transaction, Action<DbCommand> createCommand, Func<DbDataReader, IEnumerable<object>> transformFunction)
         {
             string? commandText = null;
             using (var command = connection.CreateCommand())
@@ -434,9 +420,6 @@ namespace Birko.Data.SQL.Connectors
                 }
             }
         }
-
-        private void RunCommandWithExternalTransaction(Action<DbCommand> createCommand, Action<DbCommand> executeCommand)
-            => RunCommandOn(ExternalConnection!, ExternalTransaction!, createCommand, executeCommand);
 
         /// <summary>
         /// Runs one command on a connection and transaction owned by somebody else.
@@ -540,15 +523,7 @@ namespace Birko.Data.SQL.Connectors
             var ambient = AmbientTransaction;
             if (ambient != null)
             {
-                foreach (var item in RunReaderCommandWithExternalTransaction(ambient.Connection, ambient.Transaction, createCommand, transformFunction))
-                    yield return item;
-                yield break;
-            }
-
-            // Use external transaction's connection if available
-            if (ExternalConnection != null && ExternalTransaction != null)
-            {
-                foreach (var item in RunReaderCommandWithExternalTransaction(ExternalConnection, ExternalTransaction, createCommand, transformFunction))
+                foreach (var item in RunReaderCommandOn(ambient.Connection, ambient.Transaction, createCommand, transformFunction))
                     yield return item;
                 yield break;
             }
