@@ -152,12 +152,12 @@ namespace Birko.Data.SQL.Connectors
         /// omission would change what the index means (TASK-273).
         /// </summary>
         /// <remarks>
-        /// One producer for both the sync and async funnels. The asymmetry it enforces is measured, not
-        /// symmetric: an <c>IS NOT NULL</c> term is safe to drop where partial indexes are unsupported
-        /// (MySQL treats NULLs as distinct, so the unfiltered index enforces the same rule), while an
-        /// <c>IS NULL</c> term is not (a full unique index rejects a row whose duplicate is soft-deleted, so
-        /// dropping the term over-enforces). The message names the two ways out, per § SH-H037 — a guard
-        /// that only says "no" gets reached around.
+        /// One producer for both the sync and async funnels, and it delegates the decision itself to
+        /// <see cref="AbstractConnectorBase.CanDropIndexPredicate"/> so the guard and the emitter cannot
+        /// disagree about which declarations are honourable. What is droppable is narrower than it first
+        /// appears — a non-unique index always, and a unique one only for an <c>IS NOT NULL</c> term over
+        /// one of its own key columns — see that method for the three cases and why the middle one is not
+        /// symmetry. The message names the reason and the ways out, per § SH-H037.
         /// </remarks>
         protected void RequireExpressiblePredicates(Tables.IndexDefinition index)
         {
@@ -166,18 +166,13 @@ namespace Birko.Data.SQL.Connectors
                 return;
             }
 
-            var unexpressible = index.Predicates.FirstOrDefault(p => p.RequireNull);
+            var unexpressible = index.Predicates.FirstOrDefault(p => !CanDropIndexPredicate(index, p));
             if (unexpressible == null)
             {
                 return;
             }
 
-            throw new InvalidOperationException(
-                $"Index '{index.Name}' declares WhereNull on '{unexpressible.ColumnName}', and this provider supports no "
-                + "partial index (MySQL: CREATE INDEX takes no WHERE clause, ERROR 1064). The term cannot simply be "
-                + "dropped: without it the index is a full unique index, which rejects a row whose duplicate is "
-                + "soft-deleted — a stricter constraint than the one declared. Either remove the WhereNull declaration "
-                + "and enforce it in the application, or keep this entity off this provider.");
+            throw new InvalidOperationException(UnexpressiblePredicateMessage(index, unexpressible));
         }
 
         public virtual void DropIndexes(string tableName, IEnumerable<Tables.IndexDefinition> indexes)

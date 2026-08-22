@@ -803,13 +803,9 @@ namespace Birko.Data.SQL.Connectors
             {
                 if (!SupportsPartialIndexes)
                 {
-                    if (predicate.RequireNull)
+                    if (!CanDropIndexPredicate(index, predicate))
                     {
-                        throw new InvalidOperationException(
-                            $"Index '{index.Name}' declares WhereNull on '{predicate.ColumnName}', which this provider "
-                            + "cannot express (no partial index support) and which cannot be dropped without making the "
-                            + "constraint stricter than declared. Remove the WhereNull declaration, or do not use this provider "
-                            + "for this entity.");
+                        throw new InvalidOperationException(UnexpressiblePredicateMessage(index, predicate));
                     }
                     continue;
                 }
@@ -817,6 +813,73 @@ namespace Birko.Data.SQL.Connectors
             }
 
             return terms.Count == 0 ? string.Empty : " WHERE " + string.Join(" AND ", terms);
+        }
+
+        /// <summary>
+        /// Whether a predicate this provider cannot express may be <b>dropped</b> — i.e. whether the
+        /// unfiltered index enforces the same thing the declaration asked for.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// TASK-273, corrected at its close gate. One producer for the emitter and for
+        /// <c>CreateIndexes</c>' pre-check, because the two must not disagree about which declarations are
+        /// honourable — the same discipline § Conventions applies to scope and to identifier resolution.
+        /// </para>
+        /// <para>
+        /// <b>Three cases, and the middle one is the correction.</b>
+        /// </para>
+        /// <list type="number">
+        /// <item><b>A non-unique index enforces nothing</b>, so dropping a term only widens the set of rows
+        /// it covers: bigger index, identical semantics. Droppable — and refusing it would leave a declared
+        /// optimisation absent on this provider for no correctness benefit.</item>
+        /// <item><b>A UNIQUE index whose <c>IS NOT NULL</c> column is one of its own key columns</b> is
+        /// droppable, and only because this provider treats NULLs as distinct: a row with NULL there has a
+        /// distinct key and so is already exempt from the constraint. That is the whole argument, and it does
+        /// <b>not</b> survive the column not being part of the key — a
+        /// <c>UNIQUE (TenantGuid, Number) WHERE ApprovedAt IS NOT NULL</c> dropped to
+        /// <c>UNIQUE (TenantGuid, Number)</c> starts rejecting two unapproved drafts that share a number,
+        /// which the declaration explicitly permits. Stricter than declared, silently — the exact harm the
+        /// <c>WhereNull</c> refusal exists to prevent, arriving through the polarity that looked safe.</item>
+        /// <item><b>Everything else is refused</b>: any <c>IS NULL</c> term on a unique index (dropping it
+        /// makes the constraint cover soft-deleted rows too), and any <c>IS NOT NULL</c> term over a non-key
+        /// column of a unique index.</item>
+        /// </list>
+        /// <para>
+        /// Comparison is case-insensitive: both names come from the same metadata producer today, but the
+        /// second index lane is caller-fed (see TASK-274) and a case difference there must not silently turn
+        /// a droppable term into a refused one.
+        /// </para>
+        /// </remarks>
+        protected virtual bool CanDropIndexPredicate(Tables.IndexDefinition index, Tables.IndexPredicate predicate)
+        {
+            if (!index.Unique)
+            {
+                return true;
+            }
+            if (predicate.RequireNull)
+            {
+                return false;
+            }
+            return index.Columns.Any(c => string.Equals(c.ColumnName, predicate.ColumnName, StringComparison.OrdinalIgnoreCase));
+        }
+
+        /// <summary>
+        /// The refusal text for a predicate that can be neither expressed nor dropped. Names the reason and
+        /// the ways out — § SH-H037: a guard whose message only says "no" gets reached around.
+        /// </summary>
+        protected string UnexpressiblePredicateMessage(Tables.IndexDefinition index, Tables.IndexPredicate predicate)
+        {
+            var clause = predicate.RequireNull ? "WhereNull" : "WhereNotNull";
+            var why = predicate.RequireNull
+                ? "without it the index is a full unique index, which also covers the rows the predicate excludes — "
+                  + "so it would reject a value legitimately reused after a soft delete"
+                : $"'{predicate.ColumnName}' is not one of this index's key columns, so dropping the term would apply the "
+                  + "UNIQUE constraint to rows the declaration excludes and reject values it permits";
+
+            return $"Index '{index.Name}' declares {clause} on '{predicate.ColumnName}', and this provider supports no "
+                 + "partial index (MySQL: CREATE INDEX takes no WHERE clause, ERROR 1064). The term cannot simply be "
+                 + $"dropped: {why} — a stricter constraint than the one declared. Either remove the {clause} declaration "
+                 + "and enforce it in the application, or keep this entity off this provider.";
         }
 
         /// <summary>

@@ -365,8 +365,10 @@ namespace Birko.Data.SQL
         /// That is a limit of the metadata, not a decision, and it is documented on the attribute.
         /// </para>
         /// <para>
-        /// Order is <c>WhereNotNull</c> terms then <c>WhereNull</c> terms, each in declaration order. The
-        /// emitted predicate is compared byte-for-byte by tests, and a re-run must produce the same text.
+        /// Order is <c>WhereNotNull</c> terms then <c>WhereNull</c> terms, <b>each sorted ordinally by column
+        /// name</b>. Sorted rather than in declaration order because accumulation follows
+        /// <c>Type.GetProperties()</c>, whose order the CLR leaves unspecified — so with two contributing
+        /// attributes the emitted text would be reproducible only by luck, and it is compared byte-for-byte.
         /// </para>
         /// </remarks>
         private static void ApplyIndexPredicates(
@@ -394,8 +396,13 @@ namespace Birko.Data.SQL
                         + "so the index would contain no rows at all");
                 }
 
-                foreach (var (name, requireNull) in entry.Value.NotNull.Select(n => (n, false))
-                    .Concat(entry.Value.Null.Select(n => (n, true))))
+                // Sorted, not left in accumulation order: that order is Type.GetProperties()' order, which
+                // the CLR does not specify, so with two [IndexedField] attributes contributing predicates the
+                // emitted text would be stable only by luck — and the byte-for-byte assertions in the test
+                // suite depend on it. Found at this task's close gate; the previous claim of "declaration
+                // order" was incidental rather than enforced.
+                foreach (var (name, requireNull) in entry.Value.NotNull.OrderBy(n => n, StringComparer.Ordinal).Select(n => (n, false))
+                    .Concat(entry.Value.Null.OrderBy(n => n, StringComparer.Ordinal).Select(n => (n, true))))
                 {
                     var field = fields.Values.FirstOrDefault(f => f.Property?.Name == name);
                     if (field == null || string.IsNullOrEmpty(field.Name))

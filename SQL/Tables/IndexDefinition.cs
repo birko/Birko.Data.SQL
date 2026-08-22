@@ -33,9 +33,20 @@ namespace Birko.Data.SQL.Tables
     /// <see cref="RequireNull"/>, otherwise <c>ColumnName IS NOT NULL</c>.
     /// </summary>
     /// <remarks>
-    /// TASK-273. Only these two shapes exist, and that is the point: the column name is resolved from table
-    /// metadata and the operator is one of two constants, so nothing a caller typed can reach the emitted
-    /// DDL. A general predicate string (<c>WHERE IsActive = 1</c>) would be caller text interpolated into
+    /// TASK-273. Only these two shapes exist, and that is the point: the operator is one of two constants,
+    /// and <c>DataBase.LoadIndexes</c> — <b>the only producer today</b> — resolves the column name from table
+    /// metadata, so nothing a caller typed reaches the emitted DDL.
+    /// <para>
+    /// ⚠ <b>The column name is interpolated BARE and is not validated here</b>, so that safety is a property
+    /// of the producer rather than of this type. The sibling <c>IndexColumn.ColumnName</c> is guarded at each
+    /// caller-derived construction site (<c>SqlIndexManager.ToSqlIndexDefinition</c>,
+    /// <c>SqlIndexBuilder.WithField</c>) with <c>DataBase.ValidateIndexFieldIdentifier</c>, precisely because
+    /// emitting it bare removed the incidental containment <c>QuoteIdentifier</c> used to provide
+    /// (TASK-245/249). A second producer — TASK-274 is scheduled to teach the caller-fed
+    /// <c>IIndexManager</c> lane to carry predicates — <b>must apply that same check at its construction
+    /// site</b>. The check is deliberately not applied in <c>LoadIndexes</c>, which would make the predicate
+    /// path stricter than the key-column path beside it.
+    /// </para> A general predicate string (<c>WHERE IsActive = 1</c>) would be caller text interpolated into
     /// <c>CREATE INDEX</c> — unparameterisable, and unvalidatable by
     /// <c>DataBase.ValidateIndexFieldIdentifier</c>, which checks a single bare identifier. That is the
     /// SH-H023 sink family, and it is why the supported surface is two column lists rather than a predicate.

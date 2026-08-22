@@ -175,15 +175,25 @@ namespace Birko.Data.SQL.Attributes
     /// therefore treated differently — see the policy below. </item>
     /// </list>
     /// <para>
-    /// <b>MySQL policy, per polarity, on evidence rather than symmetry.</b> A <see cref="WhereNotNull"/> tail
-    /// is <i>omitted</i> there: MySQL already treats NULLs as distinct, so the unfiltered index it does emit
-    /// means the same thing. A <see cref="WhereNull"/> tail is <i>refused</i>: omitting it would make the
-    /// constraint <b>stricter</b> than declared — measured, a plain unique index rejects a row whose
-    /// duplicate is soft-deleted, on all four providers — and silently converting a declared constraint into
-    /// a stricter one that refuses legitimate rows is worse than not creating it. Schema-ensure records that
-    /// refusal (<c>IndexCreationFailures</c>, TASK-204) and an explicit <c>CreateIndexes</c> call throws.
-    /// MySQL 8 <i>could</i> emulate it with a functional key part (measured working); that is deliberately not
-    /// done — see TASK-273 § Out of scope for the four reasons.
+    /// <b>MySQL policy: a tail is dropped only where dropping it means the same thing.</b> MySQL supports no
+    /// partial index, so each declaration is classified rather than waved through — the test is
+    /// "does the unfiltered index enforce what was declared?":
+    /// </para>
+    /// <list type="bullet">
+    /// <item><b>Non-unique index → dropped.</b> It constrains nothing, so a wider index is semantically
+    /// identical.</item>
+    /// <item><b>Unique, <see cref="WhereNotNull"/> over one of the index's own KEY columns → dropped.</b>
+    /// MySQL treats NULLs as distinct, so a row with NULL there already has a distinct key and is exempt.</item>
+    /// <item><b>Anything else → refused.</b> A <see cref="WhereNull"/> tail, and a <see cref="WhereNotNull"/>
+    /// tail over a <i>non-key</i> column: in both cases the unfiltered index applies the constraint to rows
+    /// the declaration excludes, i.e. it is <b>stricter</b> than declared and rejects legitimate rows.
+    /// <c>UNIQUE (TenantGuid, Number) WHERE ApprovedAt IS NOT NULL</c> dropped to
+    /// <c>UNIQUE (TenantGuid, Number)</c> starts refusing two unapproved drafts sharing a number.</item>
+    /// </list>
+    /// <para>
+    /// A refusal is recorded by schema-ensure (<c>IndexCreationFailures</c>, TASK-204) and thrown by an
+    /// explicit <c>CreateIndexes</c> call. MySQL 8 <i>could</i> emulate the filtered index with a functional
+    /// key part (measured working); that is deliberately not done — see TASK-273 § Out of scope.
     /// </para>
     /// <para>
     /// <b>Names are property names, resolved against the entity's mapped columns</b> exactly like
