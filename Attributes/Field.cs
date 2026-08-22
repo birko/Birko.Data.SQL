@@ -89,12 +89,22 @@ namespace Birko.Data.SQL.Attributes
     ///
     /// Set <see cref="IsUnique"/> on any contributing property to make the whole index UNIQUE
     /// (a composite unique constraint, e.g. per-tenant uniqueness over (TenantGuid, Number)).
-    /// Note: only a full (non-partial) unique index is emitted. Partial/filtered unique indexes
-    /// (e.g. <c>WHERE Number &lt;&gt; ''</c> to allow multiple empty-string drafts) are NOT supported —
-    /// they are not portable across SQLite/PostgreSQL (partial), MSSQL (filtered), and MySQL (neither).
-    /// A composite unique index therefore fits columns that are always populated; columns left empty on
-    /// drafts must rely on an application-level guarded allocator instead.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Partial (filtered) indexes ARE supported</b> via <see cref="WhereNotNull"/> and
+    /// <see cref="WhereNull"/> — see <see cref="CompositeIndex"/> for the full rationale, the measured
+    /// per-provider behaviour and the MySQL policy. This doc comment previously stated the opposite
+    /// ("only a full (non-partial) unique index is emitted … NOT supported … not portable"), which was the
+    /// record of a decision TASK-273 reversed on measurement, so it is corrected rather than left standing.
+    /// </para>
+    /// <para>
+    /// <b>Both lists are merged across every attribute contributing to the same index name</b>, exactly as
+    /// <see cref="IsUnique"/> is: the union is taken, duplicates collapse, and the result is validated once
+    /// per index. Two properties naming the same column in opposite lists is a contradiction that indexes no
+    /// rows, and it is only visible after the merge — so that is where it throws.
+    /// </para>
+    /// </remarks>
     [System.AttributeUsage(System.AttributeTargets.Property, Inherited = true, AllowMultiple = true)]
     public class IndexedField : Field
     {
@@ -102,6 +112,23 @@ namespace Birko.Data.SQL.Attributes
         public int Order { get; }
         public bool IsDescending { get; }
         public bool IsUnique { get; }
+
+        /// <inheritdoc cref="CompositeIndex.WhereNotNull"/>
+        public string[] WhereNotNull
+        {
+            get => _whereNotNull;
+            set => _whereNotNull = value ?? System.Array.Empty<string>();
+        }
+
+        /// <inheritdoc cref="CompositeIndex.WhereNull"/>
+        public string[] WhereNull
+        {
+            get => _whereNull;
+            set => _whereNull = value ?? System.Array.Empty<string>();
+        }
+
+        private string[] _whereNotNull = System.Array.Empty<string>();
+        private string[] _whereNull = System.Array.Empty<string>();
 
         public IndexedField(string name, int order = 0, bool isDescending = false, bool IsUnique = false)
         {
@@ -123,16 +150,93 @@ namespace Birko.Data.SQL.Attributes
     /// subclass — that would collide on the database-global index name and mis-apply the constraint.
     /// AllowMultiple = true: a class may declare several composite indexes.</para>
     ///
-    /// <para>Set <see cref="IsUnique"/> for a composite UNIQUE constraint. As with <see cref="IndexedField"/>,
-    /// only a full (non-partial) unique index is emitted — partial/filtered unique indexes are not supported
-    /// (not portable across providers), so this fits always-populated columns.</para>
+    /// <para>Set <see cref="IsUnique"/> for a composite UNIQUE constraint. For uniqueness over a column that
+    /// is allowed to be empty, add that column to <see cref="WhereNotNull"/> — a full unique index over a
+    /// nullable column does not work on SQL Server (see below).</para>
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Partial (filtered) indexes, and why the previous "not portable" note was wrong (TASK-273).</b>
+    /// <see cref="WhereNotNull"/> and <see cref="WhereNull"/> restrict which rows enter the index, emitted as
+    /// <c>… WHERE &lt;col&gt; IS [NOT] NULL</c>. Measured 2026-08-22 on SQL Server 2022 (16.0.4265.3),
+    /// PostgreSQL 16.15, TimescaleDB 2/PG16, MySQL 8.4.11 and SQLite 3.53.3:
+    /// </para>
+    /// <list type="bullet">
+    /// <item><b>A full unique index over a nullable column is BROKEN on SQL Server, and only there.</b> It
+    /// treats NULLs as equal, so <c>UNIQUE (TenantGuid, ExternalId)</c> admits one NULL row per tenant and
+    /// rejects the second ordinary row with <c>Msg 2601</c>. PostgreSQL, SQLite and MySQL treat NULLs as
+    /// distinct and admit any number. So this is not a missing optimisation — it breaks inserts, on the one
+    /// provider consumers do not test on.</item>
+    /// <item><b>A predicate column need not be part of the key.</b> <c>WHERE DeletedAt IS NULL</c> over a key
+    /// of <c>(TenantGuid, Number)</c> works on all three providers that support partial indexes — that is
+    /// "unique among rows that are not soft-deleted", and <c>ISoftDeletable.DeletedAt</c> is null-means-active
+    /// on every entity that implements it.</item>
+    /// <item><b>MySQL supports no partial index at all</b> (<c>ERROR 1064</c>), and the two polarities are
+    /// therefore treated differently — see the policy below. </item>
+    /// </list>
+    /// <para>
+    /// <b>MySQL policy, per polarity, on evidence rather than symmetry.</b> A <see cref="WhereNotNull"/> tail
+    /// is <i>omitted</i> there: MySQL already treats NULLs as distinct, so the unfiltered index it does emit
+    /// means the same thing. A <see cref="WhereNull"/> tail is <i>refused</i>: omitting it would make the
+    /// constraint <b>stricter</b> than declared — measured, a plain unique index rejects a row whose
+    /// duplicate is soft-deleted, on all four providers — and silently converting a declared constraint into
+    /// a stricter one that refuses legitimate rows is worse than not creating it. Schema-ensure records that
+    /// refusal (<c>IndexCreationFailures</c>, TASK-204) and an explicit <c>CreateIndexes</c> call throws.
+    /// MySQL 8 <i>could</i> emulate it with a functional key part (measured working); that is deliberately not
+    /// done — see TASK-273 § Out of scope for the four reasons.
+    /// </para>
+    /// <para>
+    /// <b>Names are property names, resolved against the entity's mapped columns</b> exactly like
+    /// <see cref="Properties"/>, so <c>[NamedField]</c> / <c>ModelMap</c> remaps are honoured and no caller
+    /// text ever reaches the DDL. A name that is not a mapped property, a column this framework declares
+    /// <c>NOT NULL</c> (or a primary key), or the same column in both lists <b>throws at table load</b>.
+    /// </para>
+    /// <para>
+    /// <b>What the nullability check can and cannot see.</b> C# nullable-reference annotations are not read,
+    /// so <c>string</c> and <c>string?</c> are the same thing here — both nullable unless
+    /// <c>[RequiredField]</c> / <c>[Required]</c> is present. A <see cref="WhereNotNull"/> naming an
+    /// always-populated <c>string</c> is therefore accepted and merely vacuous rather than refused; only a
+    /// column this framework actually declares <c>NOT NULL</c> is rejected.
+    /// </para>
+    /// <para>
+    /// <b>Limit: a CHANGED predicate is not applied to an existing database.</b> Schema-ensure matches an
+    /// index by name and never alters one, so editing these lists on an entity whose index already exists is
+    /// silently ignored on every provider (measured: SQL Server's guard skips and
+    /// <c>sys.indexes.filter_definition</c> keeps its original value). Drop the index by hand to re-create
+    /// it. Same position as TASK-257's columns and TASK-245's same-name-different-columns case.
+    /// </para>
+    /// </remarks>
     [System.AttributeUsage(System.AttributeTargets.Class, Inherited = false, AllowMultiple = true)]
     public class CompositeIndex : System.Attribute
     {
         public string Name { get; }
         public string[] Properties { get; }
         public bool IsUnique { get; set; }
+
+        /// <summary>
+        /// Property names that must be NOT NULL for a row to enter the index, emitted as
+        /// <c>WHERE &lt;col&gt; IS NOT NULL</c> (one term per name, joined with <c>AND</c>). The
+        /// "unique when set" case: a nullable business key such as an external id.
+        /// </summary>
+        public string[] WhereNotNull
+        {
+            get => _whereNotNull;
+            set => _whereNotNull = value ?? System.Array.Empty<string>();
+        }
+
+        /// <summary>
+        /// Property names that must be NULL for a row to enter the index, emitted as
+        /// <c>WHERE &lt;col&gt; IS NULL</c>. The soft-delete case: unique among live rows only, where
+        /// "live" is <c>DeletedAt IS NULL</c>. Refused on MySQL — see the class remarks.
+        /// </summary>
+        public string[] WhereNull
+        {
+            get => _whereNull;
+            set => _whereNull = value ?? System.Array.Empty<string>();
+        }
+
+        private string[] _whereNotNull = System.Array.Empty<string>();
+        private string[] _whereNull = System.Array.Empty<string>();
 
         public CompositeIndex(string name, params string[] properties)
         {

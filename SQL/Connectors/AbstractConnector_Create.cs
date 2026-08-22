@@ -107,6 +107,14 @@ namespace Birko.Data.SQL.Connectors
         {
             foreach (var index in indexes)
             {
+                // TASK-273 — refuse BEFORE DoDdlCommand, not inside it. A callback exception is re-wrapped
+                // by InitException as `new Exception(commandText, ex)`, so a caller could not select this
+                // refusal by type; thrown here it arrives intact. Schema-ensure's per-index catch still
+                // records it (TASK-204), and an explicit call still fails loudly, which is what criterion 4
+                // asks for: a provider that cannot honour the predicate must not quietly emit the index
+                // without it, because for an IS NULL term that is a STRICTER constraint than declared.
+                RequireExpressiblePredicates(index);
+
                 try
                 {
                     DoDdlCommand((command) =>
@@ -137,6 +145,39 @@ namespace Birko.Data.SQL.Connectors
                     // predicate walks InnerException instead of testing the top-level type.
                 }
             }
+        }
+
+        /// <summary>
+        /// Throws when <paramref name="index"/> carries a predicate this provider cannot express and whose
+        /// omission would change what the index means (TASK-273).
+        /// </summary>
+        /// <remarks>
+        /// One producer for both the sync and async funnels. The asymmetry it enforces is measured, not
+        /// symmetric: an <c>IS NOT NULL</c> term is safe to drop where partial indexes are unsupported
+        /// (MySQL treats NULLs as distinct, so the unfiltered index enforces the same rule), while an
+        /// <c>IS NULL</c> term is not (a full unique index rejects a row whose duplicate is soft-deleted, so
+        /// dropping the term over-enforces). The message names the two ways out, per § SH-H037 — a guard
+        /// that only says "no" gets reached around.
+        /// </remarks>
+        protected void RequireExpressiblePredicates(Tables.IndexDefinition index)
+        {
+            if (SupportsPartialIndexes || index?.Predicates == null || index.Predicates.Count == 0)
+            {
+                return;
+            }
+
+            var unexpressible = index.Predicates.FirstOrDefault(p => p.RequireNull);
+            if (unexpressible == null)
+            {
+                return;
+            }
+
+            throw new InvalidOperationException(
+                $"Index '{index.Name}' declares WhereNull on '{unexpressible.ColumnName}', and this provider supports no "
+                + "partial index (MySQL: CREATE INDEX takes no WHERE clause, ERROR 1064). The term cannot simply be "
+                + "dropped: without it the index is a full unique index, which rejects a row whose duplicate is "
+                + "soft-deleted — a stricter constraint than the one declared. Either remove the WhereNull declaration "
+                + "and enforce it in the application, or keep this entity off this provider.");
         }
 
         public virtual void DropIndexes(string tableName, IEnumerable<Tables.IndexDefinition> indexes)

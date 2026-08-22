@@ -744,8 +744,86 @@ namespace Birko.Data.SQL.Connectors
 
             var unique = index.Unique ? "UNIQUE " : "";
             var ifNotExists = conditional ? "IF NOT EXISTS " : "";
-            return $"CREATE {unique}INDEX {ifNotExists}{QuoteIdentifier(index.Name)} ON {QuoteIdentifier(tableName)} ({columns})";
+            return $"CREATE {unique}INDEX {ifNotExists}{QuoteIdentifier(index.Name)} ON {QuoteIdentifier(tableName)} ({columns})"
+                 + IndexPredicateClause(index);
         }
+
+        /// <summary>
+        /// Whether this provider can restrict an index to a subset of rows — PostgreSQL/SQLite call it a
+        /// partial index, MSSql a filtered index. Default <c>true</c>; <b>false on MySQL alone</b>, which
+        /// accepts no <c>WHERE</c> on <c>CREATE INDEX</c> at all (measured on 8.4.11 as
+        /// <c>ERROR 1064</c>, a syntax error).
+        /// </summary>
+        /// <remarks>
+        /// TASK-273, in the family of <see cref="SupportsTransactionalDdl"/> and
+        /// <see cref="FoldsUnquotedIdentifiers"/>: stated once, consulted by the funnel and by this emitter,
+        /// never re-derived as an inline <c>is MySQLConnector</c> test at a call site.
+        /// <para>
+        /// <b>What "false" costs is asymmetric between the two predicate polarities, and that asymmetry is the
+        /// policy rather than an oversight.</b> An <c>IS NOT NULL</c> term is <i>dropped</i> where this is
+        /// false: MySQL treats NULLs as distinct, so the unfiltered index it emits enforces the same rule the
+        /// filtered one would. An <c>IS NULL</c> term cannot be dropped — measured on all four providers, a
+        /// full unique index rejects a row whose duplicate is soft-deleted, so dropping the term would make
+        /// the constraint <b>stricter</b> than declared and refuse legitimate rows. That case is refused at
+        /// <c>CreateIndexes</c> instead.
+        /// </para>
+        /// <para>
+        /// A future <i>general</i> predicate (<c>WHERE IsActive = 1</c>) must <b>refuse</b> here rather than
+        /// drop, in both polarities: nothing about it is behaviour-preserving.
+        /// </para>
+        /// </remarks>
+        public virtual bool SupportsPartialIndexes => true;
+
+        /// <summary>
+        /// Renders the partial/filtered tail — <c> WHERE a IS NOT NULL AND b IS NULL</c> — or the empty
+        /// string when there is nothing to filter (the overwhelming majority, and the reason an ordinary
+        /// index's DDL is byte-identical to what it was before TASK-273).
+        /// </summary>
+        /// <remarks>
+        /// Column identifiers are emitted <b>bare</b>, like the key columns above and for the same measured
+        /// reason: <c>CreateTable</c> emits column definitions bare, so PostgreSQL stores the case-folded
+        /// name and a quoted <c>"Status"</c> cannot resolve it (§ Conventions). <c>MSSqlConnector</c>
+        /// overrides this with bracket-quoted columns, consistent with its own key-column list.
+        /// <para>
+        /// Where <see cref="SupportsPartialIndexes"/> is false the <c>IS NOT NULL</c> terms are dropped and
+        /// an <c>IS NULL</c> term <b>throws</b> — § TASK-137's rule that a renderer asked to produce
+        /// something it cannot express refuses rather than emitting a quietly different statement. The
+        /// funnel refuses first, so this is the backstop for a direct caller.
+        /// </para>
+        /// </remarks>
+        protected virtual string IndexPredicateClause(Tables.IndexDefinition index)
+        {
+            if (index.Predicates == null || index.Predicates.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            var terms = new List<string>();
+            foreach (var predicate in index.Predicates)
+            {
+                if (!SupportsPartialIndexes)
+                {
+                    if (predicate.RequireNull)
+                    {
+                        throw new InvalidOperationException(
+                            $"Index '{index.Name}' declares WhereNull on '{predicate.ColumnName}', which this provider "
+                            + "cannot express (no partial index support) and which cannot be dropped without making the "
+                            + "constraint stricter than declared. Remove the WhereNull declaration, or do not use this provider "
+                            + "for this entity.");
+                    }
+                    continue;
+                }
+                terms.Add($"{PredicateColumn(predicate.ColumnName)} IS {(predicate.RequireNull ? "NULL" : "NOT NULL")}");
+            }
+
+            return terms.Count == 0 ? string.Empty : " WHERE " + string.Join(" AND ", terms);
+        }
+
+        /// <summary>
+        /// How a predicate column is spelled. Bare by default; overridden where the provider's own column
+        /// lists are quoted, so a predicate never disagrees with the key columns beside it.
+        /// </summary>
+        protected virtual string PredicateColumn(string columnName) => columnName;
 
         /// <summary>
         /// Whether <paramref name="ex"/> reports that the index a <i>conditional</i> create asked for is

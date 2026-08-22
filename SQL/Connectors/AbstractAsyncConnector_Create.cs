@@ -90,6 +90,14 @@ namespace Birko.Data.SQL.Connectors
         {
             foreach (var index in indexes)
             {
+                // TASK-273 — refuse BEFORE DoDdlCommand, not inside it. A callback exception is re-wrapped
+                // by InitException as `new Exception(commandText, ex)`, so a caller could not select this
+                // refusal by type; thrown here it arrives intact. Schema-ensure's per-index catch still
+                // records it (TASK-204), and an explicit call still fails loudly, which is what criterion 4
+                // asks for: a provider that cannot honour the predicate must not quietly emit the index
+                // without it, because for an IS NULL term that is a STRICTER constraint than declared.
+                RequireExpressiblePredicates(index);
+
                 try
                 {
                     await DoDdlCommandAsync(async (command) =>
