@@ -941,6 +941,37 @@ namespace Birko.Data.SQL.Connectors
         }
 
         /// <summary>
+        /// Whether this provider's limit/offset syntax is only legal in a query that also has an
+        /// <c>ORDER BY</c> — <b>true on SQL Server alone</b>, where <c>OFFSET</c>/<c>FETCH</c> is defined as
+        /// part of the sort clause.
+        /// </summary>
+        /// <remarks>
+        /// TASK-278, in the family of <see cref="SupportsTransactionalDdl"/>,
+        /// <see cref="FoldsUnquotedIdentifiers"/> and <c>SupportsPartialIndexes</c>: stated once, consulted
+        /// by the one producer that needs it (<c>CreateSelectCommand</c>), never re-derived per call site.
+        /// <para>
+        /// Measured on SQL Server 2022 (16.0.4265.3): <c>FETCH NEXT 1 ROWS ONLY</c> on its own is
+        /// <c>Msg 153</c>, and <c>OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY</c> without a sort is <c>Msg 102</c>;
+        /// with any <c>ORDER BY</c> — including the placeholder <c>(SELECT NULL)</c> — both are accepted.
+        /// SQLite, PostgreSQL and MySQL take <c>LIMIT</c>/<c>OFFSET</c> with no sort at all, which is why
+        /// this defaults to false.
+        /// </para>
+        /// <para>
+        /// <b>Where a sort is synthesised, the rows returned are arbitrary — exactly as they already are on
+        /// the other three providers for a limited read with no <c>ORDER BY</c>.</b> SQL Server merely
+        /// refuses to pretend otherwise. So synthesising it preserves the cross-provider behaviour rather
+        /// than inventing one; a caller who cares which rows they get has to pass a sort on every provider.
+        /// </para>
+        /// </remarks>
+        public virtual bool RequiresOrderByForPaging => false;
+
+        /// <summary>
+        /// The <c>ORDER BY</c> body used when <see cref="RequiresOrderByForPaging"/> forces a sort onto a
+        /// query the caller did not sort. Never emitted where that is false.
+        /// </summary>
+        protected virtual string PagingPlaceholderOrderBy => "(SELECT NULL)";
+
+        /// <summary>
         /// Builds LIMIT and OFFSET clause
         /// </summary>
         public virtual string? LimitOffsetDefinition(DbCommand command, int? limit = null, int? offset = null)
@@ -1323,6 +1354,15 @@ namespace Birko.Data.SQL.Connectors
             if (orderFields != null && orderFields.Any())
             {
                 command.CommandText += " ORDER BY " + string.Join(", ", orderFields.Select(kvp => string.Format("{0} {1}", kvp.Key, kvp.Value ? "DESC" : "ASC")));
+            }
+            else if (limit != null && RequiresOrderByForPaging)
+            {
+                // TASK-278 — SQL Server defines OFFSET/FETCH as part of the sort clause, so a limited read
+                // with no ORDER BY is a syntax error there (Msg 153 / Msg 102, measured). The sort is
+                // synthesised HERE rather than inside LimitOffsetDefinition because this is the only place
+                // that knows whether the caller supplied one — and adding that knowledge to the emitter's
+                // signature would silently orphan any existing override of it.
+                command.CommandText += " ORDER BY " + PagingPlaceholderOrderBy;
             }
             if (limit != null)
             {

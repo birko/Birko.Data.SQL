@@ -253,6 +253,25 @@ declares `Atomic` / `Database` / reads-see-own-writes. The backends genuinely di
 single-partition, Mongo needs a replica set, ElasticSearch has no transactions), and a contract that hid
 that would be worse than none — see each provider's own `CLAUDE.md`.
 
+#### Limited and paged reads (TASK-278)
+
+`CreateSelectCommand` appends `LimitOffsetDefinition(...)` only when a limit is set, so an offset with no
+limit emits nothing on any provider.
+
+- **`RequiresOrderByForPaging`** — false, **true on MSSql alone**. Where true, the composer synthesises
+  `ORDER BY (SELECT NULL)` if the caller passed no sort, because T-SQL defines `OFFSET`/`FETCH` as part of
+  the sort clause: `FETCH` alone is `Msg 153` and `OFFSET`+`FETCH` without a sort is `Msg 102` (measured on
+  2022). The decision lives in the composer because that is the only place that knows whether a sort was
+  supplied — **do not** move it into `LimitOffsetDefinition` by adding a parameter, which would silently
+  orphan any existing override of that `public virtual` method.
+- **MSSql always emits the `OFFSET`**, defaulting to 0: T-SQL has no standalone `FETCH`. Before TASK-278 it
+  was omitted when the caller gave none, which made `ReadFirstAsync` (limit 1, no offset) impossible there.
+- A synthesised sort means arbitrary rows — as a bare `LIMIT` already does on the other three providers.
+- **Pinned by:** `Birko.Data.SQL.MSSql.Tests.LimitOffsetLiveTests` (7),
+  `Birko.Data.SQL.SqLite.Tests.PagedReadEndToEndTests` (5, the base path end to end),
+  `Birko.Data.SQL.Tests.Connectors.LimitOffsetEmissionTests` (3) and a `LimitOffsetCapabilityTests` in the
+  PostgreSQL and MySQL suites asserting the false side. **There was no paging coverage at all before this.**
+
 #### A missing table on a write throws; on a read it answers empty (TASK-277)
 
 `AbstractConnector.EnsureSchemaAndReport` is the shared body of every provider's `OnException` handler: if
