@@ -147,34 +147,6 @@ namespace Birko.Data.SQL.Connectors
             }
         }
 
-        /// <summary>
-        /// Throws when <paramref name="index"/> carries a predicate this provider cannot express and whose
-        /// omission would change what the index means (TASK-273).
-        /// </summary>
-        /// <remarks>
-        /// One producer for both the sync and async funnels, and it delegates the decision itself to
-        /// <see cref="AbstractConnectorBase.CanDropIndexPredicate"/> so the guard and the emitter cannot
-        /// disagree about which declarations are honourable. What is droppable is narrower than it first
-        /// appears — a non-unique index always, and a unique one only for an <c>IS NOT NULL</c> term over
-        /// one of its own key columns — see that method for the three cases and why the middle one is not
-        /// symmetry. The message names the reason and the ways out, per § SH-H037.
-        /// </remarks>
-        protected void RequireExpressiblePredicates(Tables.IndexDefinition index)
-        {
-            if (SupportsPartialIndexes || index?.Predicates == null || index.Predicates.Count == 0)
-            {
-                return;
-            }
-
-            var unexpressible = index.Predicates.FirstOrDefault(p => !CanDropIndexPredicate(index, p));
-            if (unexpressible == null)
-            {
-                return;
-            }
-
-            throw new InvalidOperationException(UnexpressiblePredicateMessage(index, unexpressible));
-        }
-
         public virtual void DropIndexes(string tableName, IEnumerable<Tables.IndexDefinition> indexes)
         {
             foreach (var index in indexes)

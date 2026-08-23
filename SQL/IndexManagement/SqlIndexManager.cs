@@ -62,6 +62,15 @@ namespace Birko.Data.SQL.IndexManagement
             // MSSql overrides) existed only because that flag was dropped on the way in, and one of those
             // copies was broken on PostgreSQL.
             var sqlIndex = ToSqlIndexDefinition(definition);
+
+            // TASK-274, criterion 8. This path calls CreateIndexSql DIRECTLY, so it does not pass through
+            // AbstractConnector.CreateIndexes and never saw that funnel's RequireExpressiblePredicates
+            // check. That was harmless only while this lane carried no predicates — and it now carries them,
+            // via Sparse. Without this the refusal would come from the emitter instead, wrapped by
+            // InitException into a bare Exception no caller can select by type (TASK-273's reason for
+            // refusing ahead of DoDdlCommand).
+            _connector.RequireExpressiblePredicates(sqlIndex);
+
             var sql = _connector.CreateIndexSql(scope!, sqlIndex);
 
             try
@@ -224,7 +233,58 @@ ORDER BY index_name, seq_in_index";
             // Unique is carried across (TASK-245). Dropping it here is what forced a parallel
             // CreateUniqueIndexSql emitter to exist in three classes, and it is also the root of the
             // separate migrations defect where SqlIndexBuilder.Build() loses .Unique() the same way.
+            // TASK-274 — Sparse, ExpireAfter and Properties used to be dropped here in silence, which is the
+            // same lost-flag shape TASK-245 fixed for Unique in this very method. Each is now carried or
+            // refused:
+            //
+            //   Sparse       -> a WhereNotNull predicate over the single field (TASK-273's machinery). For a
+            //                  compound index it is refused, because Mongo's "any key present" and a SQL
+            //                  partial index's "all of them" are different rules and IIndexDefinition does
+            //                  not say which Sparse means.
+            //   ExpireAfter  -> refused. SQL has no TTL index; a row-expiry policy is a scheduled delete,
+            //                  which is a different feature with different failure modes.
+            //   Properties   -> refused. The SQL emitter models name, uniqueness, columns and predicates;
+            //                  ElasticSearch and RavenDB DO consume Properties, which is why silently
+            //                  ignoring it here would make one lane's contract look like another's.
             var sqlDef = new Tables.IndexDefinition { Name = definition.Name, Unique = definition.Unique };
+
+            if (definition.ExpireAfter.HasValue)
+            {
+                throw Birko.Data.Patterns.Schema.IndexBuilderSupport.Unsupported(
+                    "SQL",
+                    $"a TTL index ('{definition.Name}', ExpireAfter = {definition.ExpireAfter})",
+                    "SQL has no TTL index — expiry is a scheduled delete, not an index property",
+                    "Delete expired rows on a schedule (see Birko.BackgroundJobs) instead.");
+            }
+
+            if (definition.Properties != null && definition.Properties.Count > 0)
+            {
+                throw Birko.Data.Patterns.Schema.IndexBuilderSupport.Unsupported(
+                    "SQL",
+                    $"index properties ({string.Join(", ", definition.Properties.Keys)})",
+                    "the SQL index emitter models only the name, uniqueness, column list and null-predicates",
+                    "Remove them, or use the provider's own DDL.");
+            }
+
+            if (definition.Sparse)
+            {
+                if (definition.Fields.Count != 1)
+                {
+                    throw Birko.Data.Patterns.Schema.IndexBuilderSupport.Unsupported(
+                        "SQL",
+                        $"a sparse COMPOSITE index ('{definition.Name}', {definition.Fields.Count} fields)",
+                        "Mongo's sparse compound index includes a document when ANY key is present while a "
+                        + "SQL partial index requires ALL of them, and the contract does not say which "
+                        + "Sparse means",
+                        "Declare the intent explicitly with [CompositeIndex(..., WhereNotNull = ...)], or "
+                        + "drop Sparse for a full index.");
+                }
+                sqlDef.Predicates.Add(new Tables.IndexPredicate
+                {
+                    ColumnName = DataBase.ValidateIndexFieldIdentifier(definition.Fields[0].Name),
+                    RequireNull = false,
+                });
+            }
             int order = 0;
             foreach (var field in definition.Fields)
             {

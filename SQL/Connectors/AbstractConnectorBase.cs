@@ -864,6 +864,42 @@ namespace Birko.Data.SQL.Connectors
         }
 
         /// <summary>
+        /// Throws when <paramref name="index"/> carries a predicate this provider cannot express and whose
+        /// omission would change what the index means.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// TASK-273 introduced this at <c>AbstractConnector.CreateIndexes</c>; TASK-274 moved it here and made
+        /// it <c>public</c>, because a second caller appeared. <c>SqlIndexManager.CreateAsync</c> reaches
+        /// <c>CreateIndexSql</c> <b>directly</b> rather than through that funnel, and once the
+        /// <c>IIndexManager</c> lane learned to carry predicates (via <c>IndexDefinition.Sparse</c>) it needed
+        /// the same refusal. One producer, so the two callers cannot disagree about which declarations are
+        /// honourable — the alternative was the same check written twice, which is how this repository's
+        /// guards have drifted before.
+        /// </para>
+        /// <para>
+        /// Refuse <b>before</b> the statement is built: a callback exception inside <c>DoDdlCommand</c> is
+        /// re-wrapped by <c>InitException</c> as a bare <c>Exception</c>, which no
+        /// <c>catch (InvalidOperationException)</c> can select.
+        /// </para>
+        /// </remarks>
+        public void RequireExpressiblePredicates(Tables.IndexDefinition index)
+        {
+            if (SupportsPartialIndexes || index?.Predicates == null || index.Predicates.Count == 0)
+            {
+                return;
+            }
+
+            var unexpressible = index.Predicates.FirstOrDefault(p => !CanDropIndexPredicate(index, p));
+            if (unexpressible == null)
+            {
+                return;
+            }
+
+            throw new InvalidOperationException(UnexpressiblePredicateMessage(index, unexpressible));
+        }
+
+        /// <summary>
         /// The refusal text for a predicate that can be neither expressed nor dropped. Names the reason and
         /// the ways out — § SH-H037: a guard whose message only says "no" gets reached around.
         /// </summary>
