@@ -253,6 +253,23 @@ declares `Atomic` / `Database` / reads-see-own-writes. The backends genuinely di
 single-partition, Mongo needs a replica set, ElasticSearch has no transactions), and a contract that hid
 that would be worse than none — see each provider's own `CLAUDE.md`.
 
+#### A missing table on a write throws; on a read it answers empty (TASK-277)
+
+`AbstractConnector.EnsureSchemaAndReport` is the shared body of every provider's `OnException` handler: if
+the failure looks like a missing table it calls `DoInit()` (so a consumer's `OnInit` handler can ensure the
+schema for the *next* attempt) and then **always throws**.
+
+- Until TASK-277 all four handlers did `DoInit(); return;` — the statement was discarded and the caller told
+  it succeeded. `DoInit` raises an event nothing in the framework subscribes to, and the statement is never
+  retried, so the branch could not repair anything; it could only hide the failure.
+- **Reads are unaffected and deliberately asymmetric.** `RunReaderCommandOn` catches
+  `IsMissingTableException` itself and yields break, so a read of a missing table still answers *empty* —
+  TASK-211's decision, with its own callers. Both sides are pinned by tests.
+- MSSql's handler also stopped classifying by the raw `"Invalid object name"` substring and now uses
+  `IsMissingTableException` like the rest.
+- **Pinned by:** `SchemaEnsureRollbackResidueTests` (SQLite, write throws + read still empty) and
+  `SchemaEnsureRollbackResidueLiveTests` in the PostgreSQL, MySQL and MSSql suites.
+
 #### Schema-ensure inside a boundary (TASK-244)
 
 A store's lazy schema-ensure **participates** in the caller's boundary, and a participating schema-ensure is

@@ -153,6 +153,45 @@ namespace Birko.Data.SQL.Connectors
             }
         }
 
+        /// <summary>
+        /// The shared body of every provider's <c>OnException</c> handler: ensure the schema if the failure
+        /// looks like a missing table, and then <b>always report the failure</b>.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// TASK-277. All four handlers previously answered a missing table with <c>DoInit()</c> and a
+        /// <b>return</b> — so the statement was discarded and the caller was told it had succeeded. For a
+        /// write that means the row is silently gone: measured on SQLite as <c>CreateAsync</c> returning a
+        /// non-empty <c>Guid</c> against a table that does not exist and is not created.
+        /// </para>
+        /// <para>
+        /// <b>Why the recovery it looked like never existed.</b> <c>DoInit()</c> raises the
+        /// <c>OnInit</c> event and nothing in the framework subscribes to it — only a consumer can, through
+        /// <c>IDataBaseRepository.AddOnInit</c> — and the failed statement is never retried either way. So
+        /// the branch could not repair anything even in principle; it could only hide the failure.
+        /// </para>
+        /// <para>
+        /// <c>DoInit()</c> is still called, deliberately: a consumer that registered a handler gets its
+        /// schema ensured, so the caller's <i>next</i> attempt can succeed. What changed is that this
+        /// attempt is now reported instead of being dropped.
+        /// </para>
+        /// <para>
+        /// <b>This does not touch the read contract.</b> A missing table on a read is handled in
+        /// <c>RunReaderCommandOn</c> — <c>catch (Exception ex) when (IsMissingTableException(ex))</c> →
+        /// <c>yield break</c> — which never reaches here. TASK-211 narrowed *which* errors count as a
+        /// missing table; whether an empty result is the right answer for a read is its decision, and it
+        /// keeps its stated callers (lazy create-on-first-use, view-existence probing, CR-M149).
+        /// </para>
+        /// </remarks>
+        protected void EnsureSchemaAndReport(Exception ex, string? commandText)
+        {
+            if (!IsInitializing && IsMissingTableException(ex))
+            {
+                DoInit();
+            }
+            throw new Exception(commandText, ex);
+        }
+
         public void DoInit()
         {
             if (!IsInitializing)
