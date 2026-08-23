@@ -239,15 +239,39 @@ lifetime, and it composes across stores without the caller remembering to wire e
 - **`SetTransactionContext` still exists and now works**, as store *instance* state routed through the
   same ambient mechanism, matching Mongo/Raven/Cosmos — with their caveat: safe only while the store is
   per-scope. It no longer touches the connector. Prefer `SqlUnitOfWork` for anything spanning stores.
-- **The legacy `SetExternalTransaction` pair is untouched and remains sync-only.** Its sole caller is
-  `Birko.Data.Migrations.SQL`'s `SqlSchemaBuilder`, which runs single-threaded at startup. The ambient
-  scope is checked **first**, so that caller is unaffected.
+- **⚠ The legacy `SetExternalTransaction` pair is GONE (TASK-259).** This section used to say it was
+  "untouched and remains sync-only", with `SqlSchemaBuilder` as its sole caller. That caller published its
+  connection *and* transaction onto a process-wide cached connector and never cleared them, so the runner's
+  `using` disposed both and the next store's lazy schema-ensure ran on a dead connection. The builder now
+  enters an `AmbientSqlTransaction` boundary like everything else and the pair was deleted with zero
+  production callers. Do not reintroduce it: per-caller, per-operation state on a cached connector is the
+  defect, not the spelling.
 
 **Capabilities.** `IUnitOfWork.Capabilities` (`Birko.Data.Patterns.UnitOfWork.ITransactionCapabilities`)
 states per backend what a boundary actually promises — modelled on `IJobLockProvider.IsLeaseBased`. SQL
 declares `Atomic` / `Database` / reads-see-own-writes. The backends genuinely differ (Cosmos is
 single-partition, Mongo needs a replica set, ElasticSearch has no transactions), and a contract that hid
 that would be worse than none — see each provider's own `CLAUDE.md`.
+
+#### Schema-ensure inside a boundary (TASK-244)
+
+A store's lazy schema-ensure **participates** in the caller's boundary, and a participating schema-ensure is
+**not remembered**.
+
+- Both doors agree: `InitCore` / `InitCoreAsync` enter the transaction scope, so `SetTransactionContext`
+  behaves like `SqlUnitOfWork`. Before this, `EnsureInitialized()` ran in the public wrapper while
+  `EnterTransactionScope()` lived only in `*Core`, so the per-store door ran its DDL on a connection of its
+  own — and on SQLite could not even begin one (`SQLite Error 5: 'database is locked'`, measured).
+- `_initialized` is set from `CanRememberInitialization`, which the SQL stores answer from
+  `AbstractConnector.DdlSurvivesRollback` (`AmbientTransaction == null || !SupportsTransactionalDdl`). So a
+  rollback that removes the table also leaves the store willing to re-create it. **MySQL is the provider
+  where the answer is "remember"**, because its DDL is issued off the boundary anyway.
+- Cost: one idempotent `CREATE TABLE IF NOT EXISTS` on the boundary's own connection, on the next operation
+  after a boundary-scoped init. The alternative — invalidate on rollback — has no steady-state cost and was
+  rejected as needing every not-committed path to be caught.
+- **Pinned by:** `Birko.Data.SQL.SqLite.Tests.SchemaEnsureRollbackResidueTests` (3, including one that
+  asserts the [[TASK-277]] swallow as a defect) and `SchemaEnsureRollbackResidueLiveTests` in the
+  PostgreSQL, MySQL and MSSql suites (3 each; MySQL's assert the opposite outcomes on purpose).
 
 **Pinned by:** `Birko.Data.SQL.Tests.Connectors.AmbientSqlTransactionTests` (the primitive, 14),
 `Birko.Data.SQL.SqLite.Tests.TransactionBoundaryEndToEndTests` (real SQLite, 13) and

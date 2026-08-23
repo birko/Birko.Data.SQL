@@ -174,6 +174,26 @@ namespace Birko.Data.SQL.Connectors
         protected AmbientSqlTransaction.Entry? AmbientTransaction
             => AmbientSqlTransaction.Find(_settings?.GetId());
 
+        /// <summary>
+        /// Whether DDL issued right now would survive a rollback of the ambient boundary — i.e. whether a
+        /// schema-ensure performed in this flow is durable.
+        /// </summary>
+        /// <remarks>
+        /// TASK-244, and it is deliberately expressed from the same two facts <see cref="DoDdlCommand"/>
+        /// consults, so the two cannot disagree:
+        /// <list type="bullet">
+        /// <item>no ambient boundary — nothing can roll the DDL back, so it is durable;</item>
+        /// <item>an ambient boundary on a provider whose DDL is <b>not</b> transactional (MySQL alone) —
+        /// <see cref="DoDdlCommand"/> suppresses the ambient and the statement commits on its own, so it is
+        /// durable, and TASK-243 has a test pinning exactly that;</item>
+        /// <item>an ambient boundary on PostgreSQL / SQL Server / SQLite — the DDL is part of the boundary
+        /// and a rollback removes it, so it is <b>not</b> durable.</item>
+        /// </list>
+        /// The store consumes this through <c>CanRememberInitialization</c> so that a schema-ensure which
+        /// can still be rolled back does not leave the store believing it is initialised.
+        /// </remarks>
+        public bool DdlSurvivesRollback => AmbientTransaction == null || !SupportsTransactionalDdl;
+
         public virtual void DoCommand(Action<DbCommand> createCommand, Action<DbCommand> executeCommand, bool isLock = false)
         {
             var ambient = AmbientTransaction;

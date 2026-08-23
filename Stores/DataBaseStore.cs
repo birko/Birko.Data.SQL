@@ -110,11 +110,24 @@ namespace Birko.Data.SQL.Stores
 
         #region Initialization and Lifecycle
 
+        /// <remarks>
+        /// TASK-244 — the scope is entered here as well as in every <c>*Core</c>, so the per-store
+        /// transaction door and the ambient door agree about whether schema-ensure participates. See the
+        /// async twin for the measurement.
+        /// </remarks>
         protected override void InitCore()
         {
+            using var _tx = EnterTransactionScope();
             Connector?.CreateTable(new[] { typeof(T) });
             Connector?.DoInit();
         }
+
+        /// <summary>
+        /// A schema-ensure that ran inside a caller's transaction boundary is not remembered (TASK-244) —
+        /// see the async twin.
+        /// </summary>
+        protected override bool CanRememberInitialization
+            => Connector == null || Connector.DdlSurvivesRollback;
 
         /// <inheritdoc />
         public override void Destroy()

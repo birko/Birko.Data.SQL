@@ -131,15 +131,43 @@ namespace Birko.Data.SQL.Stores
             }
         }
 
+        /// <remarks>
+        /// TASK-244 — <c>EnterTransactionScope()</c> is entered HERE as well as in every <c>*Core</c>, and
+        /// that is what makes the two transaction doors agree. The public CRUD wrapper calls
+        /// <c>EnsureInitializedAsync</c> <i>before</i> <c>*Core</c>, so with the per-store door
+        /// (<see cref="SetTransactionContext"/>) the boundary was not yet published while schema-ensure ran
+        /// and the DDL went onto a connection of its own — committing outside the caller's transaction on
+        /// three providers, and on SQLite failing outright with <c>SQLite Error 5: 'database is locked'</c>
+        /// once the caller's connection held the write lock (measured). The ambient door
+        /// (<c>SqlUnitOfWork</c>) never had that problem, because an ambient travels with the flow rather
+        /// than with the store — which is precisely the asymmetry this fixes.
+        /// </remarks>
         protected override async Task InitCoreAsync(CancellationToken ct = default)
         {
             if (Connector == null) return;
+            using var _tx = EnterTransactionScope();
             await Task.Run(() => Connector.CreateTable(new[] { typeof(T) }), ct).ConfigureAwait(false);
             if (AsyncConnector != null)
                 await AsyncConnector.DoInitAsync(ct);
             else
                 await Task.Run(() => Connector.DoInit(), ct);
         }
+
+        /// <summary>
+        /// A schema-ensure that ran inside a caller's transaction boundary is not remembered, because a
+        /// rollback would remove the table while the store went on believing it exists (TASK-244).
+        /// </summary>
+        /// <remarks>
+        /// The condition is the connector's, not this store's — see
+        /// <c>AbstractConnector.DdlSurvivesRollback</c> — so it stays in step with the provider switch
+        /// <c>DoDdlCommand</c> already consults. Measured cost of answering "no": one extra
+        /// <c>CREATE TABLE IF NOT EXISTS</c>, on the boundary's own connection, on the next operation. The
+        /// cost of the alternative was a store that never schema-ensures again and writes against a table
+        /// that is not there — reproduced in
+        /// <c>Birko.Data.SQL.SqLite.Tests.SchemaEnsureRollbackResidueTests</c>.
+        /// </remarks>
+        protected override bool CanRememberInitialization
+            => Connector == null || Connector.DdlSurvivesRollback;
 
         /// <inheritdoc />
         public override async Task DestroyAsync(CancellationToken ct = default)
