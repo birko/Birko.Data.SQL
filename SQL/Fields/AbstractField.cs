@@ -67,6 +67,43 @@ namespace Birko.Data.SQL.Fields
         /// </remarks>
         public bool IsInIndexKey => IsIndexed || IsUnique || IsPrimary;
 
+        /// <summary>
+        /// Whether this field's <c>UNIQUE</c> belongs <b>inline</b> in <c>CREATE TABLE</c> — true unless the
+        /// column is nullable, in which case the constraint is expressed as a partial unique index instead.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// TASK-275. An inline <c>UNIQUE</c> over a nullable column is broken on SQL Server and only there:
+        /// it treats NULLs as equal, so the constraint admits <b>one</b> NULL row and rejects every
+        /// subsequent row that leaves the column unset — measured on 2022 as <c>Msg 2627</c>, with the
+        /// ordinary case being exactly those rows, since the column is nullable precisely because most rows
+        /// have no value. PostgreSQL, SQLite and MySQL treat NULLs as distinct and admit any number.
+        /// </para>
+        /// <para>
+        /// <b>A predicate cannot rescue the inline form</b> — <c>Code NVARCHAR(255) NULL UNIQUE WHERE …</c> is
+        /// <c>Msg 156</c>, a syntax error — so the fix is to move the constraint to a
+        /// <c>CREATE UNIQUE INDEX … WHERE col IS NOT NULL</c>, which is what <c>DataBase.LoadIndexes</c>
+        /// synthesises when this is false. That reuses TASK-273's machinery whole, including its MySQL
+        /// policy (the term is dropped there because NULLs are already distinct, so the emitted index means
+        /// the same thing).
+        /// </para>
+        /// <para>
+        /// <b>Behaviour-preserving on three providers, fixed on one.</b> A partial unique index admits many
+        /// NULLs on MSSql, PostgreSQL and SQLite, and MySQL's unfiltered one does too — which is what the
+        /// inline constraint already did everywhere except SQL Server. So this changes the emitted DDL on all
+        /// four while changing the observable rule on only the broken one.
+        /// </para>
+        /// <para>
+        /// A <b>primary</b> field keeps the inline form: <c>PRIMARY KEY</c> implies NOT NULL, so the
+        /// NULLs-are-equal question cannot arise, and moving it would change the table's key rather than an
+        /// auxiliary constraint. <see cref="IsInIndexKey"/> is deliberately unaffected either way — the
+        /// column is still an index key, so MSSql must still bound an unlengthed string (TASK-257) whichever
+        /// shape carries the uniqueness.
+        /// </para>
+        /// </remarks>
+        public bool UsesInlineUniqueConstraint => IsUnique && (IsNotNull || IsPrimary);
+
+
         public bool IsAggregate { get; set; } = false;
         public System.Reflection.PropertyInfo Property { get; set; } = null!;
         public Tables.Table Table { get; set; } = null!;

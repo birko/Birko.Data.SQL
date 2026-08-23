@@ -109,7 +109,7 @@ namespace Birko.Data.SQL
                             {
                                 field.Value.Table = table;
                             }
-                            table.Indexes = LoadIndexes(type, table.Fields);
+                            table.Indexes = LoadIndexes(type, table.Fields, table.Name);
                             return table;
                         }
                     }
@@ -129,7 +129,7 @@ namespace Birko.Data.SQL
                 {
                     foreach (var field in table.Fields)
                         field.Value.Table = table;
-                    table.Indexes = LoadIndexes(type, table.Fields);
+                    table.Indexes = LoadIndexes(type, table.Fields, table.Name);
                     return table;
                 }
             }
@@ -137,7 +137,12 @@ namespace Birko.Data.SQL
             return null;
         }
 
-        public static Dictionary<string, IndexDefinition> LoadIndexes(Type type, Dictionary<string, AbstractField> fields)
+        /// <param name="tableName">
+        /// The table the indexes belong to, used to name the unique indexes synthesised for nullable
+        /// <c>[UniqueField]</c> columns (TASK-275). Optional so existing callers compile; when it is null no
+        /// such index is synthesised, which is why <c>LoadTable</c> passes it.
+        /// </param>
+        public static Dictionary<string, IndexDefinition> LoadIndexes(Type type, Dictionary<string, AbstractField> fields, string? tableName = null)
         {
             var indexes = new Dictionary<string, IndexDefinition>();
 
@@ -297,6 +302,11 @@ namespace Birko.Data.SQL
                 AddPredicateNames(predicateNames, name, whereNotNullNames, whereNullNames);
             }
 
+            // TASK-275 — a nullable [UniqueField] column carries its constraint as a partial unique index
+            // rather than as an inline UNIQUE. Synthesised BEFORE the predicates are resolved so it goes
+            // through exactly the same rendering, refusal and per-provider policy as a declared one.
+            SynthesiseNullableUniqueIndexes(type, indexes, predicateNames, fields, tableName);
+
             // TASK-273 — resolve the merged predicate names once both attribute forms have contributed.
             ApplyIndexPredicates(type, indexes, predicateNames, fields);
 
@@ -307,6 +317,80 @@ namespace Birko.Data.SQL
             }
 
             return indexes;
+        }
+
+        /// <summary>
+        /// Gives every nullable <c>[UniqueField]</c> column a unique index filtered to its non-null rows,
+        /// replacing the inline <c>UNIQUE</c> that <c>FieldDefinition</c> no longer emits for it (TASK-275).
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The inline form is broken on SQL Server and only there — it treats NULLs as equal, so it admits
+        /// one NULL row and rejects every later row that leaves the column unset (<c>Msg 2627</c>) — and a
+        /// predicate cannot be attached to it (<c>Msg 156</c>). Expressing it as
+        /// <c>CREATE UNIQUE INDEX … WHERE col IS NOT NULL</c> reuses TASK-273's machinery whole, including
+        /// the MySQL policy that drops the term because NULLs are already distinct there.
+        /// </para>
+        /// <para>
+        /// <b>Named <c>ux_{table}_{column}</c>, and a collision throws.</b> Index names are database-global on
+        /// PostgreSQL and SQLite, so the table name has to be in it. If a declared index already owns that
+        /// name this refuses rather than merging into it: silently adding a column to somebody else's index
+        /// would change their constraint (§ SH-H037, and the same reasoning as the view-field key collision
+        /// in TASK-207).
+        /// </para>
+        /// <para>
+        /// <c>IsIndexed</c> is set for the same reason the two declared paths set it (TASK-248): the column is
+        /// now an index key, so a provider whose key types are restricted must know. On MySQL that is what
+        /// makes the synthesised index buildable at all — an unlengthed string is <c>LONGTEXT</c> otherwise
+        /// and cannot be indexed (ERROR 1170). It does not change <see cref="AbstractField.IsInIndexKey"/>,
+        /// which was already true via <c>IsUnique</c>.
+        /// </para>
+        /// </remarks>
+        private static void SynthesiseNullableUniqueIndexes(
+            Type type,
+            Dictionary<string, IndexDefinition> indexes,
+            Dictionary<string, (List<string> NotNull, List<string> Null)> predicateNames,
+            Dictionary<string, AbstractField> fields,
+            string? tableName)
+        {
+            if (string.IsNullOrEmpty(tableName))
+            {
+                return;
+            }
+
+            foreach (var field in fields.Values)
+            {
+                if (field == null || field.UsesInlineUniqueConstraint || !field.IsUnique || field.IsPrimary)
+                {
+                    continue;
+                }
+
+                var name = $"ux_{tableName}_{field.Name}";
+                if (indexes.TryGetValue(name, out var existing))
+                {
+                    var alreadyOurs = existing.Unique
+                        && existing.Columns.Count == 1
+                        && existing.Columns[0].ColumnName == field.Name;
+                    if (alreadyOurs)
+                    {
+                        continue;
+                    }
+                    throw new Exceptions.TableAttributeException(
+                        $"{type.FullName}: the unique index synthesised for nullable [UniqueField] column '{field.Name}' "
+                        + $"would be named '{name}', which a declared index already uses. Rename the declared index, or "
+                        + "mark the column [RequiredField] so its UNIQUE stays inline.");
+                }
+
+                var idx = new IndexDefinition { Name = name, Unique = true };
+                idx.Columns.Add(new IndexColumn { ColumnName = field.Name, Order = 0 });
+                indexes[name] = idx;
+
+                field.IsIndexed = true;
+
+                // Routed through the same accumulator a declared WhereNotNull uses, so the term is resolved,
+                // validated and rendered by one path rather than two.
+                AddPredicateNames(predicateNames, name, new[] { field.Property?.Name ?? field.Name }, Array.Empty<string>());
+            }
         }
 
         /// <summary>

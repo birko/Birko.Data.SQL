@@ -253,6 +253,30 @@ declares `Atomic` / `Database` / reads-see-own-writes. The backends genuinely di
 single-partition, Mongo needs a replica set, ElasticSearch has no transactions), and a contract that hid
 that would be worse than none — see each provider's own `CLAUDE.md`.
 
+#### A nullable `[UniqueField]` column carries an index, not an inline constraint (TASK-275)
+
+`AbstractField.UsesInlineUniqueConstraint` = `IsUnique && (IsNotNull || IsPrimary)`. When it is false,
+`DataBase.LoadIndexes` synthesises `ux_{table}_{column}` — a UNIQUE index with a `WhereNotNull` predicate —
+and no provider emits the inline `UNIQUE`.
+
+- **Why:** SQL Server treats NULLs as equal for a UNIQUE constraint, so an inline `UNIQUE` over a nullable
+  column admits one NULL row and rejects every later row that leaves it unset (`Msg 2627`), and a predicate
+  cannot be attached to an inline constraint (`Msg 156`). The other three providers treat NULLs as distinct
+  and were never broken — the DDL changes for them, the behaviour does not.
+- **Scope:** nullable only. `[RequiredField]` and `[PrimaryField]` keep the inline form with byte-identical
+  DDL.
+- **Reuse:** the synthesised index goes through TASK-273's predicate accumulator, so MySQL drops the
+  `IS NOT NULL` term there (NULLs already distinct) and everything else renders it.
+- **Name collisions throw** rather than merging into a declared index of the same name.
+- **The column becomes `IsIndexed`**, which is what bounds it on MySQL (`LONGTEXT` cannot be indexed) —
+  incidentally covering part of TASK-265 for this shape. `IsInIndexKey` is unchanged, so TASK-257's MSSql
+  bounding still applies, which the synthesised index *requires* (`MAX` cannot be an index key).
+- **Pinned by:** `NullableUniqueColumnLiveTests` (MSSql 3, MySQL 2), `NullableUniqueColumnEndToEndTests`
+  (SQLite 4, including the producer's two sides), `NullableUniqueColumnLiveTests` (PostgreSQL 2).
+- ⚠ **Nothing repairs an existing database.** A table created before this keeps its inline constraint and
+  keeps rejecting the second NULL row on SQL Server. The remedy is by hand: drop the constraint and create
+  the filtered index.
+
 #### Limited and paged reads (TASK-278)
 
 `CreateSelectCommand` appends `LimitOffsetDefinition(...)` only when a limit is set, so an offset with no
