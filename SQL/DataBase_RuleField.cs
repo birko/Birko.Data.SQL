@@ -207,6 +207,74 @@ namespace Birko.Data.SQL
         }
 
         /// <summary>
+        /// The same bare-identifier check applied to a <b>column reference</b> that is interpolated into a
+        /// statement the caller does not otherwise control (TASK-255).
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Fourth sink in the interpolated-identifier family, and it arrived the same way the third did:
+        /// a column reference must be emitted <b>bare</b> to resolve the case-folded column that
+        /// bare-column <c>CREATE TABLE</c> actually creates on PostgreSQL, and bare removes the accidental
+        /// containment that identifier quoting was providing. The first caller is
+        /// <c>TimescaleDBMigration.BuildContinuousAggregateSql</c>, whose bucketing column reaches
+        /// <c>time_bucket(…, &lt;col&gt;)</c> inside a <c>CREATE MATERIALIZED VIEW</c> body — a real
+        /// identifier position, so neither literal escaping nor <c>CatalogueNameLiteral</c> applies.
+        /// </para>
+        /// <para>
+        /// <b>Why this exists rather than a call to <see cref="ValidateIndexFieldIdentifier"/>.</b> The
+        /// check is identical and deliberately shares <c>_unqualifiedIdentifier</c> with it, so the sinks
+        /// cannot drift about what an acceptable identifier is. What differs is the <i>message</i>: that
+        /// one names <c>CREATE INDEX</c> and an index column list, which would tell a migration author
+        /// about indexes they never mentioned. A refusal has to name the door the caller actually has
+        /// (§ Conventions, TASK-215), so the shared thing is the regex and the separate thing is the
+        /// wording.
+        /// </para>
+        /// <para>
+        /// Same tier and same honest limit as its siblings: this is the <b>weaker</b> fallback, used where
+        /// there is no entity type to resolve against, so it cannot fix a <c>[NamedField]</c> remapping.
+        /// What it guarantees is that whatever reaches <c>CommandText</c> is a single bare identifier — every
+        /// measured payload carries a space, an operator, a parenthesis or a statement separator — and that
+        /// a bare identifier naming no column is at worst a database error, which is a wrong answer that
+        /// reports itself.
+        /// </para>
+        /// <para>
+        /// A <c>Table.</c> qualifier is refused, as in the index sink and for a comparable reason: this
+        /// framework only ever emits a qualifier where a bare alias introduces it (TASK-211), and the
+        /// statements this guards introduce none.
+        /// </para>
+        /// </remarks>
+        /// <param name="column">The column reference to validate.</param>
+        /// <param name="paramName">
+        /// The name of the <i>caller's</i> parameter, for <see cref="ArgumentException.ParamName"/>. Defaults
+        /// to <c>"column"</c>, but a caller whose parameter is called something else should pass its own name:
+        /// the same "a refusal names the door THIS caller has" rule that gives this method a message separate
+        /// from <see cref="ValidateIndexFieldIdentifier"/>'s applies to the <c>ParamName</c> too, and a
+        /// <c>ParamName</c> naming a parameter the caller does not have is the quiet version of the defect
+        /// (§ Conventions, TASK-215).
+        /// </param>
+        /// <exception cref="ArgumentException">The name is blank or not a bare, unqualified identifier.</exception>
+        public static string ValidateColumnIdentifier(string? column, string paramName = "column")
+        {
+            if (string.IsNullOrWhiteSpace(column))
+            {
+                throw new ArgumentException(
+                    "A column reference is blank. Every interpolated column reference must name a column.",
+                    paramName);
+            }
+
+            if (!_unqualifiedIdentifier.IsMatch(column!))
+            {
+                throw new ArgumentException(
+                    $"Column '{column}' is not a plain, unqualified column identifier, and column references "
+                    + "are interpolated bare into the statement. Supply a bare column name "
+                    + "(a 'Table.Column' qualifier is not accepted here).",
+                    paramName);
+            }
+
+            return column!;
+        }
+
+        /// <summary>
         /// The one lookup order shared by both identifier sinks — the ORDER BY keys
         /// (<see cref="ResolveOrderFields"/>) and the rule fields (<see cref="ResolveRuleField"/>).
         /// Property name first (what callers normally write), then the mapped column name (which worked
