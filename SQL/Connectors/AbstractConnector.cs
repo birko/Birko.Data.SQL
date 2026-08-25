@@ -51,9 +51,14 @@ namespace Birko.Data.SQL.Connectors
         //
         // The re-attempt itself is deliberately KEPT — it is what lets the index appear on its own once an
         // operator repairs the offending rows, with no restart. Only the bookkeeping is deduplicated.
-        private readonly Dictionary<string, IndexCreationFailure> _indexCreationFailures =
-            new(StringComparer.OrdinalIgnoreCase);
-        private readonly object _indexFailureLock = new();
+        // TASK-254 extracted the keyed / transition-fired / clearable / locked / ordered bookkeeping into
+        // SchemaEnsureFailureLog so there is ONE implementation of it, not two: the hypertable channel on
+        // TimescaleDBConnector needs the identical behaviour. This surface is unchanged -- IndexCreationFailure,
+        // IndexCreationFailures, OnIndexCreationFailed, Record*, Clear* all keep their exact signatures and
+        // semantics, because a consumer depends on them by name (measured: Symbio's production code, tests,
+        // specs and CLAUDE.md).
+        private readonly SchemaEnsureFailureLog<IndexCreationFailure> _indexCreationFailures =
+            new(f => f.TableName + "\u0000" + (f.IndexName ?? string.Empty));
 
         private static string IndexFailureKey(string tableName, string? indexName)
             => tableName + "\u0000" + (indexName ?? string.Empty);
@@ -71,17 +76,9 @@ namespace Birko.Data.SQL.Connectors
         /// </remarks>
         public IReadOnlyList<IndexCreationFailure> IndexCreationFailures
         {
-            get
-            {
-                lock (_indexFailureLock)
-                {
-                    // Ordered so a host's startup report is stable rather than dictionary-dependent.
-                    return _indexCreationFailures.Values
-                        .OrderBy(x => x.TableName, StringComparer.OrdinalIgnoreCase)
-                        .ThenBy(x => x.IndexName ?? string.Empty, StringComparer.OrdinalIgnoreCase)
-                        .ToArray();
-                }
-            }
+            // Ordered so a host's startup report is stable rather than dictionary-dependent. The sort key
+            // combines table and index exactly as the pre-TASK-254 OrderBy/ThenBy pair did.
+            get => _indexCreationFailures.Snapshot;
         }
 
         /// <summary>
@@ -106,15 +103,9 @@ namespace Birko.Data.SQL.Connectors
         protected void RecordIndexCreationFailure(string tableName, string? indexName, Exception error)
         {
             var failure = new IndexCreationFailure(tableName, indexName, error);
-            bool isNew;
-            lock (_indexFailureLock)
-            {
-                var key = IndexFailureKey(tableName, indexName);
-                isNew = !_indexCreationFailures.ContainsKey(key);
-                // Always overwrite: the latest error is the one that describes the current state.
-                _indexCreationFailures[key] = failure;
-            }
-            if (isNew)
+            // Record returns true only on the TRANSITION into failure -- an event per attempt would fire on
+            // every HTTP request for a per-request store over an unbuildable index.
+            if (_indexCreationFailures.Record(IndexFailureKey(tableName, indexName), failure))
             {
                 OnIndexCreationFailed?.Invoke(failure);
             }
@@ -126,10 +117,7 @@ namespace Birko.Data.SQL.Connectors
         /// </summary>
         protected void ClearIndexCreationFailure(string tableName, string? indexName)
         {
-            lock (_indexFailureLock)
-            {
-                _indexCreationFailures.Remove(IndexFailureKey(tableName, indexName));
-            }
+            _indexCreationFailures.Clear(IndexFailureKey(tableName, indexName));
         }
 
         public AbstractConnector(PasswordSettings settings) : base(settings)
