@@ -171,13 +171,100 @@ namespace Birko.Data.SQL.Connectors
         /// keeps its stated callers (lazy create-on-first-use, view-existence probing, CR-M149).
         /// </para>
         /// </remarks>
+        // TASK-286 — when this connector last completed a CREATE TABLE for a given table name.
+        //
+        // Diagnostic only: nothing branches on it, and it is deliberately NOT a claim that the table
+        // exists now. It answers one question that could not otherwise be answered after the fact —
+        // "was this table created earlier in this process, and then reported missing?" — which is exactly
+        // the open question in consumer Symbio's TASK-602.
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTimeOffset> _tablesCreated
+            = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Tables this connector has completed a <c>CREATE TABLE</c> for, and when.
+        /// </summary>
+        /// <remarks>
+        /// ⚠ <b>Not an inventory and not proof of existence.</b> Schema-ensure is lazy, so a table nobody
+        /// has touched is absent from this map while existing perfectly well in an older database; and a
+        /// create that was later rolled back with a caller's transaction stays recorded. It exists to date
+        /// a create, not to assert a current state — the same caveat <see cref="IndexCreationFailures"/>
+        /// carries, for the same lazy-initialisation reason.
+        /// </remarks>
+        public IReadOnlyDictionary<string, DateTimeOffset> TablesCreated => _tablesCreated;
+
+        /// <summary>Records that a <c>CREATE TABLE</c> for <paramref name="name"/> completed.</summary>
+        protected void RecordTableCreated(string name)
+        {
+            if (!string.IsNullOrEmpty(name))
+            {
+                _tablesCreated[name] = DateTimeOffset.UtcNow;
+            }
+        }
+
         protected void EnsureSchemaAndReport(Exception ex, string? commandText)
         {
             if (!IsInitializing && IsMissingTableException(ex))
             {
                 DoInit();
             }
-            throw new Exception(commandText, ex);
+            throw new Exception(DescribeSchemaEscape(ex, commandText), ex);
+        }
+
+        /// <summary>
+        /// The message <see cref="EnsureSchemaAndReport"/> throws: the command text, plus — when this is a
+        /// missing-table failure on a table this connector already created — the time of that create.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// TASK-286, and it exists to make one specific anomaly self-reporting rather than hunted.
+        /// A store gates every public CRUD call on <c>EnsureInitializedAsync</c>, which creates the table
+        /// before the statement runs — so a missing-table failure arriving <i>here</i> means the store
+        /// believed it was already initialised. If this connector also has a create recorded for that
+        /// table, the table was created and later found missing, and the two timestamps bound the window.
+        /// </para>
+        /// <para>
+        /// ⚠ <b>It rides on the exception message on purpose.</b> Consumer Symbio surfaces connector
+        /// diagnostics through boot-time checks (<c>UniqueIndexDataCheck</c>, <c>SchemaDriftCheck</c>),
+        /// which by construction cannot see a runtime escape, and it subscribes to no connector event. An
+        /// event would therefore have been recorded nowhere. This lands in the log the host already writes,
+        /// with no wiring to forget.
+        /// </para>
+        /// <para>
+        /// ⚠ <b>Diagnostic only — nothing branches on it.</b> Measured in Symbio across eleven hypotheses:
+        /// every mechanism reachable by reading the code was eliminated, so the remaining candidates are
+        /// timing or visibility effects that only an observation can separate. Guessing further was the
+        /// wrong instrument.
+        /// </para>
+        /// </remarks>
+        private string? DescribeSchemaEscape(Exception ex, string? commandText)
+        {
+            if (string.IsNullOrEmpty(commandText) || !IsMissingTableException(ex))
+            {
+                return commandText;
+            }
+
+            // Name the tables this connector created that the failing statement mentions. Substring rather
+            // than SQL parsing: this is a diagnostic hint, and a false positive costs one extra line in an
+            // exception nobody sees unless something already went wrong.
+            var created = _tablesCreated
+                .Where(kvp => commandText.Contains(kvp.Key, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(kvp => kvp.Key, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (created.Count == 0)
+            {
+                return commandText
+                    + " [schema-ensure escape: this connector has NO recorded CREATE TABLE for any table"
+                    + " named in the statement]";
+            }
+
+            var when = string.Join(", ", created.Select(kvp =>
+                $"{kvp.Key} created {kvp.Value:O}"));
+            return commandText
+                + $" [schema-ensure escape: reported missing at {DateTimeOffset.UtcNow:O}, but this"
+                + $" connector already created it — {when}. The store's init gate had therefore passed,"
+                + " so the table was created and later found absent; these two timestamps bound the"
+                + " window (TASK-286 / Symbio TASK-602)]";
         }
 
         public void DoInit()

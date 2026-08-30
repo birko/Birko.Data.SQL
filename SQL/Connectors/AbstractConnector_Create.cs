@@ -95,6 +95,16 @@ namespace Birko.Data.SQL.Connectors
             {
                 command.ExecuteNonQuery();
             }, true);
+
+            // TASK-286 — diagnostic only. Recorded AFTER the statement returns, so a create that threw is
+            // not recorded. Every CreateTable overload funnels here, which is why this is the one place it
+            // needs to go.
+            //
+            // ⚠ It does NOT mean the table exists now: a create inside a caller's transaction boundary is
+            // undone by a rollback and stays recorded (measured in Symbio — the rolled-back cart create
+            // left no Carts table). That is deliberate, because the question it answers is "was this ever
+            // created, and when", which is precisely what cannot be reconstructed after the fact.
+            RecordTableCreated(name);
         }
 
         /// <param name="throwIfExists">
