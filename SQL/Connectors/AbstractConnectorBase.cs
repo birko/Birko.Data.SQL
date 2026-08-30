@@ -109,6 +109,41 @@ namespace Birko.Data.SQL.Connectors
         }
 
         /// <summary>
+        /// <see cref="IsMissingTableException"/> applied to an exception <b>and every inner exception</b>.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// TASK-285. The direct predicate tests <c>ex.Message</c> only, which is right where it is used —
+        /// the reader catches the provider's own exception, unwrapped. Anything downstream of
+        /// <c>InitException</c> does not get that: <c>AbstractConnector.EnsureSchemaAndReport</c> rethrows
+        /// as <c>new Exception(commandText, ex)</c>, so the outer message is the <b>SQL text</b> and the
+        /// provider's "no such table" is one level down.
+        /// </para>
+        /// <para>
+        /// ⚠ <b>A caller that used the direct predicate there would compile, run, and silently never
+        /// match</b> — the fix would look applied while changing nothing. That is the whole reason this
+        /// exists as its own named member rather than as an inline <c>ex.InnerException</c> check at one
+        /// call site.
+        /// </para>
+        /// <para>
+        /// It calls the <b>virtual</b> predicate at every level, so each provider's phrasing keeps working
+        /// through its override — PostgreSQL's <c>relation "x" does not exist</c>, MySQL's
+        /// <c>doesn't exist</c>, MSSQL's <c>Invalid object name</c>.
+        /// </para>
+        /// </remarks>
+        public bool IsMissingTableExceptionChain(Exception? ex)
+        {
+            for (var current = ex; current != null; current = current.InnerException)
+            {
+                if (IsMissingTableException(current))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>
         /// Executes an action with retry logic for transient failures.
         /// </summary>
         protected void ExecuteWithRetry(Action action, string? commandText = null)

@@ -44,20 +44,48 @@ namespace Birko.Data.SQL.Connectors
             long count = 0;
             if (tableNames != null && tableNames.Any() && tableNames.Any(x => !string.IsNullOrEmpty(x)))
             {
-                DoCommand((command) => {
-                    command = CreateSelectCommand(
-                        command,
-                        tableNames.Where(x => !string.IsNullOrEmpty(x)).Distinct(),
-                        new Dictionary<int, string>()
-                        {
-                            { 0, "count(*) as count"}
-                        },
-                        joinconditions, conditions);
-                }, (command) =>
+                try
                 {
-                    var data = command.ExecuteScalar();
-                    count = data != null ? Convert.ToInt64(data) : 0;
-                });
+                    DoCommand((command) => {
+                        command = CreateSelectCommand(
+                            command,
+                            tableNames.Where(x => !string.IsNullOrEmpty(x)).Distinct(),
+                            new Dictionary<int, string>()
+                            {
+                                { 0, "count(*) as count"}
+                            },
+                            joinconditions, conditions);
+                    }, (command) =>
+                    {
+                        var data = command.ExecuteScalar();
+                        count = data != null ? Convert.ToInt64(data) : 0;
+                    });
+                }
+                catch (Exception ex) when (IsMissingTableExceptionChain(ex))
+                {
+                    // TASK-285 — THE COUNT OF A TABLE THAT DOES NOT EXIST IS 0, exactly as the list of its
+                    // rows is empty.
+                    //
+                    // A reader already answers this condition with `yield break` (AbstractConnector.cs:452,
+                    // async :378) — IsMissingTableException exists, in its own words, so "a reader can yield
+                    // an empty result instead of faulting". A COUNT is a read. Before this, it was the one
+                    // read that faulted instead, so the same missing table produced an empty list on one
+                    // route and a 500 on another, decided purely by the statement's shape.
+                    //
+                    // ⚠ SCOPED TO COUNTS, AND DELIBERATELY NOT TO EnsureSchemaAndReport. That method throws
+                    // because TASK-277 measured WRITES being silently discarded — Create returning a real
+                    // Guid against a table that was never created. Writes must keep reporting; widening
+                    // this catch to them reopens that defect.
+                    //
+                    // ⚠ CHAIN, not the direct predicate: EnsureSchemaAndReport rethrows as
+                    // `new Exception(commandText, ex)`, so the outer message is the SQL and a message-only
+                    // check silently never matches (see IsMissingTableExceptionChain).
+                    //
+                    // Raised by Symbio TASK-602, where this surfaced as an intermittent 500 on a fresh
+                    // deployment. It does NOT explain why the table was missing — that question stays open
+                    // there — it makes the answer correct either way.
+                    return 0;
+                }
             }
             return count;
         }

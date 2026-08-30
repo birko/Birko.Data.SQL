@@ -46,22 +46,31 @@ namespace Birko.Data.SQL.Connectors
             long count = 0;
             if (tableNames != null && tableNames.Any() && tableNames.Any(x => !string.IsNullOrEmpty(x)))
             {
-                await DoCommandAsync(async (command) =>
+                try
                 {
-                    command = CreateSelectCommand(
-                        command,
-                        tableNames.Where(x => !string.IsNullOrEmpty(x)).Distinct(),
-                        new Dictionary<int, string>()
-                        {
-                            { 0, "count(*) as count"}
-                        },
-                        joinconditions, conditions);
-                    await Task.CompletedTask;
-                }, async (command) =>
+                    await DoCommandAsync(async (command) =>
+                    {
+                        command = CreateSelectCommand(
+                            command,
+                            tableNames.Where(x => !string.IsNullOrEmpty(x)).Distinct(),
+                            new Dictionary<int, string>()
+                            {
+                                { 0, "count(*) as count"}
+                            },
+                            joinconditions, conditions);
+                        await Task.CompletedTask;
+                    }, async (command) =>
+                    {
+                        var data = await command.ExecuteScalarAsync(ct);
+                        count = data != null ? Convert.ToInt64(data) : 0;
+                    });
+                }
+                catch (Exception ex) when (IsMissingTableExceptionChain(ex))
                 {
-                    var data = await command.ExecuteScalarAsync(ct);
-                    count = data != null ? Convert.ToInt64(data) : 0;
-                });
+                    // TASK-285 — the count of a table that does not exist is 0, exactly as the list of its
+                    // rows is empty. See the sync overload for why; the reasoning is not repeated.
+                    return 0;
+                }
             }
             return count;
         }
