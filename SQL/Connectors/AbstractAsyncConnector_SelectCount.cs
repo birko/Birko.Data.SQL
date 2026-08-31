@@ -74,7 +74,13 @@ namespace Birko.Data.SQL.Connectors
                     // the sync overload, not a wrapper over it, so a fix applied to one of the two looks
                     // green while leaving the other exactly as it was; that asymmetry is the recurring
                     // shape of defect in this area. Both call the same producer.
-                    RecordSchemaEscape(ex, tableNames);
+                    //
+                    // ⚠ TASK-288 moved that recording one layer earlier and this call site is gone. The
+                    // anomaly is now detected once, in EnsureSchemaAndReport, where the annotation is
+                    // written — because the same detection also has to bump SchemaGeneration so a store
+                    // whose table vanished stops trusting its remembered initialization. Recording here as
+                    // well would have been unreachable in practice: the annotation only exists because
+                    // that handler ran, so anything this call could record it had already recorded.
                     return 0;
                 }
             }

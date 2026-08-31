@@ -120,6 +120,8 @@ namespace Birko.Data.SQL.Stores
             using var _tx = EnterTransactionScope();
             Connector?.CreateTable(new[] { typeof(T) });
             Connector?.DoInit();
+            // TASK-288 — see the async twin. After CreateTable, deliberately.
+            _initSchemaGeneration = Connector?.SchemaGeneration ?? 0;
         }
 
         /// <summary>
@@ -128,6 +130,43 @@ namespace Birko.Data.SQL.Stores
         /// </summary>
         protected override bool CanRememberInitialization
             => Connector == null || Connector.DdlSurvivesRollback;
+
+        // TASK-288 — the connector's SchemaGeneration as it stood when this store last schema-ensured.
+        //
+        // Captured AFTER CreateTable, not before: an escape observed while our own schema-ensure was
+        // running has just been addressed by it, and treating that as staleness would re-run forever.
+        private long _initSchemaGeneration;
+
+        /// <summary>
+        /// A remembered initialization stops being trusted once this connector has seen a table it created
+        /// being reported missing.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// TASK-288, from consumer Symbio's TASK-627. <c>EnsureSchemaAndReport</c> documented itself, and
+        /// TASK-277 justified it, as "rethrow so this attempt is reported, but call <c>DoInit()</c> so the
+        /// next attempt can succeed". The second half was not delivered: <c>DoInit()</c> raises an event no
+        /// framework code subscribes to and issues no per-entity DDL, so with the table dropped beneath an
+        /// initialised store <b>five consecutive writes threw and the table was never recreated</b> — only
+        /// a new store instance recovered it. This is the half that makes the promise true, and it is on
+        /// the store because the flag that was wrong is the store's.
+        /// </para>
+        /// <para>
+        /// ⚠ <b>Compared, not subscribed.</b> Connectors are cached process-wide per (type, settings id)
+        /// while a store is typically per-request, so an event subscription here would accumulate dead
+        /// stores on a process-lifetime object — TASK-204's defect. A counter read costs nothing and
+        /// cannot leak.
+        /// </para>
+        /// <para>
+        /// ⚠ <b>Gated on the anomaly, not on "a table was missing".</b> The generation only moves for a
+        /// table this connector itself created, which is the only case where a store can be initialised
+        /// and its table absent. Ordinary lazy first-touch is also a missing table and is roughly 245×
+        /// more common per bring-up (measured in Symbio); reacting to it would re-run schema-ensure for
+        /// every store on the database, hundreds of times per start-up, for no reason.
+        /// </para>
+        /// </remarks>
+        protected override bool CanTrustRememberedInitialization
+            => Connector == null || Connector.SchemaGeneration == _initSchemaGeneration;
 
         /// <inheritdoc />
         public override void Destroy()

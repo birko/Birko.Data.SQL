@@ -290,6 +290,12 @@ namespace Birko.Data.SQL.Connectors
                 return;
             }
 
+            // TASK-288 — recording the escape and invalidating the stores' remembered initialization are
+            // the SAME event, so they are one statement apart and cannot be wired up separately. A heal
+            // that nobody could see would have cost Symbio TASK-602 the discriminator it was reasoning
+            // from ("a real absence never heals") and handed back nothing.
+            System.Threading.Interlocked.Increment(ref _schemaGeneration);
+
             var names = (tableNames ?? Array.Empty<string>())
                 .Where(x => !string.IsNullOrEmpty(x))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -341,42 +347,17 @@ namespace Birko.Data.SQL.Connectors
             }
         }
 
-        /// <summary>
-        /// The shared body of every provider's <c>OnException</c> handler: ensure the schema if the failure
-        /// looks like a missing table, and then <b>always report the failure</b>.
-        /// </summary>
-        /// <remarks>
-        /// <para>
-        /// TASK-277. All four handlers previously answered a missing table with <c>DoInit()</c> and a
-        /// <b>return</b> — so the statement was discarded and the caller was told it had succeeded. For a
-        /// write that means the row is silently gone: measured on SQLite as <c>CreateAsync</c> returning a
-        /// non-empty <c>Guid</c> against a table that does not exist and is not created.
-        /// </para>
-        /// <para>
-        /// <b>Why the recovery it looked like never existed.</b> <c>DoInit()</c> raises the
-        /// <c>OnInit</c> event and nothing in the framework subscribes to it — only a consumer can, through
-        /// <c>IDataBaseRepository.AddOnInit</c> — and the failed statement is never retried either way. So
-        /// the branch could not repair anything even in principle; it could only hide the failure.
-        /// </para>
-        /// <para>
-        /// <c>DoInit()</c> is still called, deliberately: a consumer that registered a handler gets its
-        /// schema ensured, so the caller's <i>next</i> attempt can succeed. What changed is that this
-        /// attempt is now reported instead of being dropped.
-        /// </para>
-        /// <para>
-        /// <b>This does not touch the read contract.</b> A missing table on a read is handled in
-        /// <c>RunReaderCommandOn</c> — <c>catch (Exception ex) when (IsMissingTableException(ex))</c> →
-        /// <c>yield break</c> — which never reaches here. TASK-211 narrowed *which* errors count as a
-        /// missing table; whether an empty result is the right answer for a read is its decision, and it
-        /// keeps its stated callers (lazy create-on-first-use, view-existence probing, CR-M149).
-        /// </para>
-        /// </remarks>
         // TASK-286 — when this connector last completed a CREATE TABLE for a given table name.
         //
-        // Diagnostic only: nothing branches on it, and it is deliberately NOT a claim that the table
-        // exists now. It answers one question that could not otherwise be answered after the fact —
-        // "was this table created earlier in this process, and then reported missing?" — which is exactly
-        // the open question in consumer Symbio's TASK-602.
+        // ⚠ TASK-286 said "diagnostic only: nothing branches on it". That stopped being true at TASK-288 —
+        // an entry here is now what tells EnsureSchemaAndReport it is looking at the anomaly rather than an
+        // ordinary first touch, which drives both the SchemaEscapes record and the SchemaGeneration bump
+        // that makes a store forget its remembered initialization. It is load-bearing; treat a change to
+        // what gets recorded here as a behaviour change.
+        //
+        // It is still deliberately NOT a claim that the table exists now. It answers one question that
+        // could not otherwise be answered after the fact — "was this table created earlier in this process,
+        // and then reported missing?" — which is exactly the open question in consumer Symbio's TASK-602.
         private readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTimeOffset> _tablesCreated
             = new(StringComparer.OrdinalIgnoreCase);
 
@@ -401,13 +382,86 @@ namespace Birko.Data.SQL.Connectors
             }
         }
 
+        // TASK-288 — bumped whenever an anomalous schema escape is seen, and read by the SQL stores'
+        // CanTrustRememberedInitialization so a store whose table has vanished forgets that it is
+        // initialised and schema-ensures again on its next operation.
+        //
+        // ⚠ A PULL, not an event, and that is the whole reason it is a counter. The obvious wiring is for
+        // a store to subscribe to something on the connector — but connectors are cached process-wide per
+        // (connector type, settings id) while a web app resolves a store per request, so a per-request
+        // subscriber list on a process-lifetime object grows without bound and keeps dead stores alive.
+        // That is TASK-204's defect exactly. A counter the store reads costs one volatile read per
+        // operation and cannot leak.
+        private long _schemaGeneration;
+
+        /// <summary>
+        /// Increments each time this connector observes a table it created being reported missing.
+        /// </summary>
+        /// <remarks>
+        /// A store that recorded this value when it initialised, and later reads a different one, knows
+        /// its schema-ensure may no longer hold. Meaningless in absolute terms — only changes matter.
+        /// </remarks>
+        public long SchemaGeneration => System.Threading.Interlocked.Read(ref _schemaGeneration);
+
+        /// <summary>
+        /// The shared body of every provider's <c>OnException</c> handler: ensure the schema if the failure
+        /// looks like a missing table, and then <b>always report the failure</b>.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// TASK-277. All four handlers previously answered a missing table with <c>DoInit()</c> and a
+        /// <b>return</b> — so the statement was discarded and the caller was told it had succeeded. For a
+        /// write that means the row is silently gone: measured on SQLite as <c>CreateAsync</c> returning a
+        /// non-empty <c>Guid</c> against a table that does not exist and is not created.
+        /// </para>
+        /// <para>
+        /// ⚠ <b><c>DoInit()</c> is not what makes the next attempt succeed, and TASK-288 stopped this
+        /// comment claiming it was.</b> <c>DoInit()</c> raises the <c>OnInit</c> event, which nothing in
+        /// the framework subscribes to — only a consumer can, through <c>IDataBaseRepository.AddOnInit</c>
+        /// — and it issues no per-entity DDL of its own. Measured on SQLite (Symbio TASK-627, reproduced
+        /// in <c>VanishedTableHealingTests</c>): with the table dropped beneath an initialised store,
+        /// <b>five consecutive writes threw and <c>sqlite_master</c> held 0 rows throughout</b>. Only a new
+        /// store instance recovered it, which is what proved the broken state was the store's remembered
+        /// <c>_initialized</c> flag rather than anything on disk. <c>DoInit()</c> is still called, because
+        /// a consumer that registered a handler should still get it.
+        /// </para>
+        /// <para>
+        /// <b>What does make the next attempt succeed is <see cref="SchemaGeneration"/>.</b> An anomalous
+        /// escape — a table this connector itself created being reported missing — bumps it, and the SQL
+        /// stores stop trusting their remembered initialization, so the next operation re-runs
+        /// schema-ensure. The framework's own asymmetry argues for this: per
+        /// <c>AbstractStore.CanRememberInitialization</c>, answering "do not remember" costs one idempotent
+        /// <c>CREATE TABLE IF NOT EXISTS</c> while answering it wrongly leaves a store broken for the life
+        /// of the process.
+        /// </para>
+        /// <para>
+        /// <b>And every such invalidation is recorded</b> on <see cref="SchemaEscapes"/> /
+        /// <see cref="OnSchemaEscapeDetected"/>, deliberately. Healing removes the discriminator Symbio
+        /// TASK-602 was using — "a real absence never heals, and both observed occurrences healed, so the
+        /// anomaly is not an absent table" — so the behaviour change had to hand back a stronger signal
+        /// than it took away: an absent table now announces itself in a channel instead of being inferred
+        /// from a symptom.
+        /// </para>
+        /// <para>
+        /// <b>This does not touch the read contract.</b> A missing table on a read is handled in
+        /// <c>RunReaderCommandOn</c> — <c>catch (Exception ex) when (IsMissingTableException(ex))</c> →
+        /// <c>yield break</c> — which never reaches here. TASK-211 narrowed *which* errors count as a
+        /// missing table; whether an empty result is the right answer for a read is its decision, and it
+        /// keeps its stated callers (lazy create-on-first-use, view-existence probing, CR-M149).
+        /// </para>
+        /// </remarks>
         protected void EnsureSchemaAndReport(Exception ex, string? commandText)
         {
             if (!IsInitializing && IsMissingTableException(ex))
             {
                 DoInit();
             }
-            throw new Exception(DescribeSchemaEscape(ex, commandText), ex);
+
+            // One detection point for the whole framework. Both the record and the generation bump hang off
+            // it, and so does the annotation, so the three cannot disagree about which case is the anomaly.
+            var reported = new Exception(DescribeSchemaEscape(ex, commandText), ex);
+            RecordSchemaEscape(reported, CreatedTablesNamedIn(commandText).Select(kvp => kvp.Key));
+            throw reported;
         }
 
         /// <summary>
@@ -436,6 +490,32 @@ namespace Birko.Data.SQL.Connectors
         /// wrong instrument.
         /// </para>
         /// </remarks>
+        /// <summary>
+        /// The tables this connector created that <paramref name="commandText"/> mentions — empty for an
+        /// ordinary first-touch failure, non-empty for the anomaly.
+        /// </summary>
+        /// <remarks>
+        /// Substring rather than SQL parsing: a false positive costs one extra line in an exception nobody
+        /// sees unless something already went wrong.
+        /// <para>
+        /// Extracted at TASK-288 because three things now hang off this one answer — the annotation, the
+        /// <see cref="SchemaEscapes"/> record, and the <see cref="SchemaGeneration"/> bump that lets a
+        /// store heal. Computing it in two places is how those three would come to disagree about which
+        /// case is the anomaly.
+        /// </para>
+        /// </remarks>
+        private List<KeyValuePair<string, DateTimeOffset>> CreatedTablesNamedIn(string? commandText)
+        {
+            if (string.IsNullOrEmpty(commandText))
+            {
+                return new List<KeyValuePair<string, DateTimeOffset>>();
+            }
+            return _tablesCreated
+                .Where(kvp => commandText!.Contains(kvp.Key, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(kvp => kvp.Key, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
         private string? DescribeSchemaEscape(Exception ex, string? commandText)
         {
             if (string.IsNullOrEmpty(commandText) || !IsMissingTableException(ex))
@@ -443,13 +523,7 @@ namespace Birko.Data.SQL.Connectors
                 return commandText;
             }
 
-            // Name the tables this connector created that the failing statement mentions. Substring rather
-            // than SQL parsing: this is a diagnostic hint, and a false positive costs one extra line in an
-            // exception nobody sees unless something already went wrong.
-            var created = _tablesCreated
-                .Where(kvp => commandText.Contains(kvp.Key, StringComparison.OrdinalIgnoreCase))
-                .OrderBy(kvp => kvp.Key, StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            var created = CreatedTablesNamedIn(commandText);
 
             if (created.Count == 0)
             {

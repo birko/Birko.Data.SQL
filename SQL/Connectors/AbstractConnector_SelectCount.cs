@@ -96,7 +96,13 @@ namespace Birko.Data.SQL.Connectors
                     // rethrowing reopens exactly what the paragraph above closed. Discrimination is on
                     // TASK-286's annotation and never on "the table was missing", because ordinary lazy
                     // first-touch is also a missing table and is ~245x more common per bring-up.
-                    RecordSchemaEscape(ex, tableNames);
+                    //
+                    // ⚠ TASK-288 moved that recording one layer earlier and this call site is gone. The
+                    // anomaly is now detected once, in EnsureSchemaAndReport, where the annotation is
+                    // written — because the same detection also has to bump SchemaGeneration so a store
+                    // whose table vanished stops trusting its remembered initialization. Recording here as
+                    // well would have been unreachable in practice: the annotation only exists because
+                    // that handler ran, so anything this call could record it had already recorded.
                     return 0;
                 }
             }
