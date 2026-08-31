@@ -84,6 +84,19 @@ namespace Birko.Data.SQL.Connectors
                     // Raised by Symbio TASK-602, where this surfaced as an intermittent 500 on a fresh
                     // deployment. It does NOT explain why the table was missing — that question stays open
                     // there — it makes the answer correct either way.
+                    //
+                    // TASK-287 — but the answer is not the whole story, and the annotation TASK-286
+                    // produces travels ON THE THROWN EXCEPTION, which this catch has just consumed. So
+                    // the one case worth seeing was being produced and discarded here: measured against a
+                    // live Symbio API on 2026-08-31, a COUNT answered 200 with totalCount 0 and logged
+                    // ZERO lines while a write in the identical condition answered 500 and logged the
+                    // annotation — and both occurrences Symbio TASK-602 ever recorded were counts.
+                    //
+                    // Recorded on the connector's existing failure-log/event channel, NOT rethrown:
+                    // rethrowing reopens exactly what the paragraph above closed. Discrimination is on
+                    // TASK-286's annotation and never on "the table was missing", because ordinary lazy
+                    // first-touch is also a missing table and is ~245x more common per bring-up.
+                    RecordSchemaEscape(ex, tableNames);
                     return 0;
                 }
             }

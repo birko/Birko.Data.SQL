@@ -31,12 +31,23 @@ namespace Birko.Data.SQL.Connectors
     /// property. Reshaping it is consumer-visible; extracting the mechanism underneath it is not.
     /// </para>
     /// <para>
-    /// <b>Deliberately used by exactly two callers and no more are expected</b> — the index channel on
-    /// <c>AbstractConnector</c> and the hypertable channel on <c>TimescaleDBConnector</c>. Compression and
-    /// retention policies are <i>not</i> schema-ensure steps (they are migration-path only, and an explicit
-    /// call should throw), so they are not future callers. This is not built for reuse; it is built so the
-    /// logic above has one home. <b>If it acquires configuration or a type hierarchy, that is the signal it
-    /// should have stayed two copies.</b>
+    /// <b>Three callers, and the third arrived without changing this class</b> — the index channel on
+    /// <c>AbstractConnector</c>, the hypertable channel on <c>TimescaleDBConnector</c>, and (TASK-287) the
+    /// schema-escape channel on <c>AbstractConnector</c>. TASK-254 wrote that no third was expected and
+    /// gave its reason: compression and retention policies are <i>not</i> schema-ensure steps (they are
+    /// migration-path only, and an explicit call should throw), so they are still not callers. What it did
+    /// not foresee is a channel for a failure that is <i>answered</i> rather than degraded — the same
+    /// bookkeeping, arriving from a different direction.
+    /// </para>
+    /// <para>
+    /// ⚠ <b>The third caller uses <see cref="Record"/> and deliberately never calls <see cref="Clear"/>.</b>
+    /// It records a past event rather than a repairable current condition; the reasoning is on
+    /// <c>AbstractConnector.SchemaEscapes</c>. That is a partial use of this class, not a new mode in it —
+    /// no configuration, no type hierarchy — so the warning below still stands as written.
+    /// </para>
+    /// <para>
+    /// This is not built for reuse; it is built so the logic above has one home. <b>If it acquires
+    /// configuration or a type hierarchy, that is the signal it should have stayed separate copies.</b>
     /// </para>
     /// <para>
     /// The re-attempt itself is NOT suppressed — schema-ensure retries on the next run, which is what lets a

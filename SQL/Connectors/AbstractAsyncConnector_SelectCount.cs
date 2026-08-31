@@ -69,6 +69,12 @@ namespace Birko.Data.SQL.Connectors
                 {
                     // TASK-285 — the count of a table that does not exist is 0, exactly as the list of its
                     // rows is empty. See the sync overload for why; the reasoning is not repeated.
+                    //
+                    // TASK-287 — and the escape is recorded here too. This is a SEPARATE code path from
+                    // the sync overload, not a wrapper over it, so a fix applied to one of the two looks
+                    // green while leaving the other exactly as it was; that asymmetry is the recurring
+                    // shape of defect in this area. Both call the same producer.
+                    RecordSchemaEscape(ex, tableNames);
                     return 0;
                 }
             }

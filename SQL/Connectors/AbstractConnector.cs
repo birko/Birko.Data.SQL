@@ -35,6 +35,66 @@ namespace Birko.Data.SQL.Connectors
             => $"index '{IndexName ?? "(unnamed)"}' on table '{TableName}': {Error.Message}";
     }
 
+    /// <summary>
+    /// A statement that failed because its table was missing <b>although this connector had already
+    /// created that table</b> — TASK-286's anomaly — on a path that answers the failure instead of
+    /// reporting it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// TASK-287. TASK-285 made a <c>COUNT</c> of a missing table return <b>0</b>, which is the right
+    /// answer and is the answer a <c>SELECT</c> of the same table already gave. TASK-286 then made
+    /// <c>EnsureSchemaAndReport</c> annotate its exception when the table being reported missing is one
+    /// this connector created. The two do not compose: the annotation travels <b>on the thrown
+    /// exception</b>, and on the count path there is no longer a thrown exception to travel on, so it was
+    /// produced and immediately discarded.
+    /// </para>
+    /// <para>
+    /// ⚠ <b>That blind spot was over the only shape ever seen in the wild.</b> Both occurrences consumer
+    /// Symbio's TASK-602 recorded were counts. Measured 2026-08-31 against a live API, both halves in the
+    /// same deliberately-forced condition minutes apart: a <b>COUNT</b> answered <c>200</c> with
+    /// <c>totalCount: 0</c> and logged <b>zero</b> lines, while a <b>write</b> answered <c>500</c> and
+    /// logged the annotation. Nineteen instrumented bring-ups had logged <b>0</b> escapes against
+    /// <b>4,397</b> benign first-touch errors — on the write path that silence is real, on the count path
+    /// <c>0</c> is what a blind instrument reports whether the condition happened 0 times or 19.
+    /// </para>
+    /// <para>
+    /// ⚠ <b>Anomalous only.</b> An ordinary lazy first-touch failure is <i>also</i> a missing table and is
+    /// roughly <b>245× more common</b> per bring-up, so this channel discriminates on TASK-286's
+    /// annotation — "this connector already created it" — and never on "the table was missing". A channel
+    /// that recorded every missing table would be no signal at all.
+    /// </para>
+    /// </remarks>
+    public sealed class SchemaEscape
+    {
+        public SchemaEscape(IReadOnlyList<string> tableNames, string? annotation, Exception error)
+        {
+            TableNames = tableNames;
+            Annotation = annotation;
+            Error = error;
+            DetectedAt = DateTimeOffset.UtcNow;
+        }
+
+        /// <summary>The tables the answered statement named, distinct and ordered.</summary>
+        /// <remarks>
+        /// The set, not the one that was absent: a joined count names several and the provider's error
+        /// does not always say which. Recording the set is honest; guessing would not be.
+        /// </remarks>
+        public IReadOnlyList<string> TableNames { get; }
+
+        /// <summary>TASK-286's annotated message, carrying the statement and the create's timestamp.</summary>
+        public string? Annotation { get; }
+
+        /// <summary>The failure as caught, with the provider's own error in its chain.</summary>
+        public Exception Error { get; }
+
+        /// <summary>When this escape was answered rather than reported.</summary>
+        public DateTimeOffset DetectedAt { get; }
+
+        public override string ToString()
+            => $"schema escape on '{string.Join(", ", TableNames)}' at {DetectedAt:O}: {Annotation ?? Error.Message}";
+    }
+
     public abstract partial class AbstractConnector : AbstractConnectorBase
     {
         public event InitConnector OnInit = null!;
@@ -118,6 +178,146 @@ namespace Birko.Data.SQL.Connectors
         protected void ClearIndexCreationFailure(string tableName, string? indexName)
         {
             _indexCreationFailures.Clear(IndexFailureKey(tableName, indexName));
+        }
+
+        // TASK-287 — the same keyed / transition-fired / locked / ordered bookkeeping the index channel
+        // above uses, for schema escapes that a path ANSWERS instead of reporting.
+        //
+        // Keyed rather than listed for the reason recorded on SchemaEnsureFailureLog: connectors are cached
+        // process-wide per (connector type, settings id) while a web app resolves a store per request, so a
+        // list on this object grows for as long as the condition lasts.
+        //
+        // ⚠ There is deliberately NO Clear counterpart, and that is the one place this channel departs from
+        // the index one. An unbuildable index is a CURRENT condition an operator repairs, so a stale record
+        // must be able to drop out. An escape is a PAST event at a timestamp: nothing an operator does makes
+        // it not have happened, and the condition heals on its own within milliseconds (the very next count
+        // usually succeeds), so clearing on success would delete the record before any reader could see it —
+        // leaving the channel observable only through an event, which is precisely the "recorded nowhere"
+        // outcome TASK-286 was written to avoid.
+        private readonly SchemaEnsureFailureLog<SchemaEscape> _schemaEscapes =
+            new(f => string.Join("\u0000", f.TableNames));
+
+        /// <summary>
+        /// Schema escapes this connector answered rather than reported — a statement that failed because
+        /// its table was missing on a table this connector had already created. Empty in the normal case,
+        /// and empty is the normal case.
+        /// </summary>
+        /// <remarks>
+        /// ⚠ <b>Ordinary lazy first-touch is NOT recorded here.</b> That is also a missing table and is far
+        /// more common (measured at roughly 245 per bring-up in consumer Symbio against 0 escapes in
+        /// nineteen); recording it would drown the one entry that means something.
+        /// <para>
+        /// One entry per statement's table set, however many times it has occurred — the latest occurrence
+        /// overwrites, so <see cref="SchemaEscape.DetectedAt"/> is the most recent one. A repeat therefore
+        /// refreshes the record without raising <see cref="OnSchemaEscapeDetected"/> again.
+        /// </para>
+        /// </remarks>
+        public IReadOnlyList<SchemaEscape> SchemaEscapes => _schemaEscapes.Snapshot;
+
+        /// <summary>
+        /// Raised the first time a given statement's table set produces a schema escape that was answered
+        /// rather than reported. Subscribe to log or escalate; the caller still receives its answer.
+        /// </summary>
+        /// <remarks>
+        /// Fires on the TRANSITION into the condition, not on every occurrence — the count path runs per
+        /// request, so an event per occurrence would storm exactly as the index channel's did before
+        /// TASK-204 keyed it.
+        /// <para>
+        /// ⚠ <b>A host has to subscribe for this to reach a log.</b> Consumer Symbio surfaces connector
+        /// diagnostics through boot-time checks, which by construction cannot see a runtime escape — so
+        /// TASK-286 rode on the exception message instead. On this path there is no exception to ride on,
+        /// which is why the channel exists and why wiring it is the host's remaining half.
+        /// </para>
+        /// </remarks>
+        public event Action<SchemaEscape>? OnSchemaEscapeDetected;
+
+        /// <summary>
+        /// The marker TASK-286's annotation carries in the anomalous case, and the <b>only</b>
+        /// discriminator this channel uses.
+        /// </summary>
+        /// <remarks>
+        /// One producer: <see cref="DescribeSchemaEscape"/> writes it and
+        /// <see cref="IsAnomalousSchemaEscapeChain"/> reads it, so the two cannot drift into disagreeing
+        /// about which case is the anomaly.
+        /// </remarks>
+        private const string AnomalousEscapeMarker = "but this connector already created it";
+
+        /// <summary>
+        /// Whether anywhere in <paramref name="ex"/>'s chain sits TASK-286's anomalous annotation.
+        /// </summary>
+        /// <remarks>
+        /// ⚠ <b>The chain, not the outermost message.</b> <see cref="EnsureSchemaAndReport"/> rethrows as
+        /// <c>new Exception(annotatedText, ex)</c> and callers may wrap that again, so the annotation sits
+        /// at an arbitrary depth. A check on <c>ex.Message</c> alone compiles, runs, and silently never
+        /// matches — the identical inert guard already shipped once here, which is why
+        /// <see cref="AbstractConnectorBase.IsMissingTableExceptionChain"/> exists.
+        /// <para>
+        /// ⚠ <b>Defensive, not witnessed — say which, or the next reader deletes it as dead weight.</b>
+        /// Measured on SQLite: on both live count paths the annotation is at depth <b>0</b>, because
+        /// nothing between <c>EnsureSchemaAndReport</c> and the catch wraps again. So collapsing this loop
+        /// to a single-message check fails exactly <b>one</b> test — the synthetic one that hands it a
+        /// twice-wrapped exception — and no end-to-end one. It is kept because the depth is a property of
+        /// the call stack rather than a promise: <c>InitException</c> is reached from eleven sites, a
+        /// provider may wrap, and the failure mode of guessing wrong is a guard that runs and never
+        /// matches.
+        /// </para>
+        /// </remarks>
+        public bool IsAnomalousSchemaEscapeChain(Exception? ex)
+            => FindAnomalousAnnotation(ex) != null;
+
+        /// <summary>
+        /// Records — and, on the transition, raises — a schema escape that a caller is about to answer
+        /// instead of reporting. Does nothing for ordinary lazy first-touch.
+        /// </summary>
+        /// <remarks>
+        /// Called from both <c>SelectCount</c> overloads. It is one shared producer rather than a copy in
+        /// each because the sync and async count paths are separate code, and shipping one of the two is
+        /// how half a fix looks green here.
+        /// <para>
+        /// ⚠ <b>It deliberately does not rethrow.</b> Doing so is tempting — the table is not genuinely
+        /// missing, so <c>0</c> is a wrong answer — but it silently reopens what TASK-285 closed, and at
+        /// roughly one bring-up in five that turns a real defect back into something read as infrastructure
+        /// flakiness. This task adds observation, not behaviour. If the throw is ever wanted it is a
+        /// decision with a consequence, taken deliberately.
+        /// </para>
+        /// </remarks>
+        protected void RecordSchemaEscape(Exception ex, IEnumerable<string>? tableNames)
+        {
+            var annotation = FindAnomalousAnnotation(ex);
+            if (annotation == null)
+            {
+                // Ordinary lazy first-touch. Silent on purpose — see SchemaEscapes.
+                return;
+            }
+
+            var names = (tableNames ?? Array.Empty<string>())
+                .Where(x => !string.IsNullOrEmpty(x))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            var escape = new SchemaEscape(names, annotation, ex);
+            if (_schemaEscapes.Record(string.Join("\u0000", names), escape))
+            {
+                OnSchemaEscapeDetected?.Invoke(escape);
+            }
+        }
+
+        /// <summary>
+        /// The annotated message from the chain, so a subscriber need not walk it again, and so the
+        /// predicate and the record cannot disagree about what they matched.
+        /// </summary>
+        private static string? FindAnomalousAnnotation(Exception? ex)
+        {
+            for (var current = ex; current != null; current = current.InnerException)
+            {
+                if (current.Message != null
+                    && current.Message.Contains(AnomalousEscapeMarker, StringComparison.Ordinal))
+                {
+                    return current.Message;
+                }
+            }
+            return null;
         }
 
         public AbstractConnector(PasswordSettings settings) : base(settings)
@@ -260,9 +460,14 @@ namespace Birko.Data.SQL.Connectors
 
             var when = string.Join(", ", created.Select(kvp =>
                 $"{kvp.Key} created {kvp.Value:O}"));
+            // The marker is interpolated rather than spelled out, so DescribeSchemaEscape (which writes it)
+            // and IsAnomalousSchemaEscapeChain (which reads it) have ONE producer: TASK-287 has to
+            // recognise this exact case on the count path, where the exception is answered rather than
+            // thrown, and two spellings of the discriminator is how that guard would go quietly inert.
             return commandText
-                + $" [schema-ensure escape: reported missing at {DateTimeOffset.UtcNow:O}, but this"
-                + $" connector already created it — {when}. The store's init gate had therefore passed,"
+                + $" [schema-ensure escape: reported missing at {DateTimeOffset.UtcNow:O}, "
+                + AnomalousEscapeMarker
+                + $" — {when}. The store's init gate had therefore passed,"
                 + " so the table was created and later found absent; these two timestamps bound the"
                 + " window (TASK-286 / Symbio TASK-602)]";
         }
