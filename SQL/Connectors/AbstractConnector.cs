@@ -95,6 +95,39 @@ namespace Birko.Data.SQL.Connectors
             => $"schema escape on '{string.Join(", ", TableNames)}' at {DetectedAt:O}: {Annotation ?? Error.Message}";
     }
 
+
+    /// <summary>
+    /// A diagnostic subscriber that threw. Recorded so a handler's own defect is reported rather than
+    /// discarded — <b>and never raised as an event</b>, because an event announcing an event's failure has
+    /// the identical hole.
+    /// </summary>
+    /// <remarks>
+    /// TASK-289. Same "current state, keyed" contract as <see cref="IndexCreationFailure"/>: one entry per
+    /// (channel, exception type) however many times it has fired, latest occurrence wins, empty in the
+    /// normal case. Read it when a diagnostic channel appears to be silent — an entry here means the
+    /// framework raised the event and the host's handler failed, which looks exactly like nothing having
+    /// happened.
+    /// </remarks>
+    public sealed class SubscriberFailure
+    {
+        public SubscriberFailure(string channel, Exception error)
+        {
+            Channel = channel;
+            Error = error;
+            DetectedAt = DateTimeOffset.UtcNow;
+        }
+
+        /// <summary>The event whose subscriber threw, e.g. <c>OnSchemaEscapeDetected</c>.</summary>
+        public string Channel { get; }
+
+        /// <summary>The handler's own exception, exactly as thrown.</summary>
+        public Exception Error { get; }
+
+        public DateTimeOffset DetectedAt { get; }
+
+        public override string ToString()
+            => $"subscriber to '{Channel}' threw at {DetectedAt:O}: {Error.GetType().Name}: {Error.Message}";
+    }
     public abstract partial class AbstractConnector : AbstractConnectorBase
     {
         public event InitConnector OnInit = null!;
@@ -167,6 +200,14 @@ namespace Birko.Data.SQL.Connectors
             // every HTTP request for a per-request store over an unbuildable index.
             if (_indexCreationFailures.Record(IndexFailureKey(tableName, indexName), failure))
             {
+                // ⚠ A BARE Invoke, and deliberately still so — TASK-283 owns this one. A throwing
+                // subscriber here propagates out of schema-ensure and bricks the entity, which is the
+                // same hole TASK-289 closed on OnSchemaEscapeDetected with RaiseDiagnostic. It is NOT
+                // changed here because this channel is consumed in Symbio production code, its host, two
+                // test files and its specs, so changing whether a handler exception propagates is a
+                // behaviour change on consumed surface and needs TASK-283 own measurement first.
+                // When that measurement is done, adopt RaiseDiagnostic rather than writing a second
+                // policy beside it.
                 OnIndexCreationFailed?.Invoke(failure);
             }
         }
@@ -281,6 +322,87 @@ namespace Birko.Data.SQL.Connectors
         /// decision with a consequence, taken deliberately.
         /// </para>
         /// </remarks>
+        // TASK-289 — the last-resort sink for a diagnostic handler that threw. Keyed by (channel, exception
+        // type) so a logging bug and a metrics bug stay distinguishable, and DELIBERATELY WITHOUT AN EVENT:
+        // announcing a subscriber failure through a subscriber is the same hole one level up.
+        private readonly SchemaEnsureFailureLog<SubscriberFailure> _subscriberFailures =
+            new(f => f.Channel + " " + f.Error.GetType().FullName);
+
+        /// <summary>
+        /// Diagnostic subscribers that threw. Empty in the normal case; an entry means the framework
+        /// raised an event and the <b>host's</b> handler failed.
+        /// </summary>
+        /// <remarks>
+        /// Check this when a diagnostic channel looks silent — a broken handler and an event that never
+        /// fired are indistinguishable from the outside, and this is what tells them apart.
+        /// </remarks>
+        public IReadOnlyList<SubscriberFailure> SubscriberFailures => _subscriberFailures.Snapshot;
+
+        /// <summary>
+        /// Raises a diagnostic event so that a handler's exception <b>cannot</b> reach the caller, and so
+        /// that one bad handler cannot suppress the others.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// TASK-289, measured before it was written. <c>OnSchemaEscapeDetected</c> is raised from inside
+        /// <see cref="EnsureSchemaAndReport"/>, between building the annotated exception and throwing it,
+        /// so a subscriber that threw <b>replaced</b> that exception. Two consequences, and the second is
+        /// the one that is easy to miss:
+        /// </para>
+        /// <list type="number">
+        /// <item>the write lost TASK-286's annotation — the instrument was destroyed by the handler written
+        /// to read it;</item>
+        /// <item>the replacement no longer satisfied <c>SelectCount</c>'s
+        /// <c>catch … when (IsMissingTableExceptionChain(ex))</c>, so the <b>exception filter stopped
+        /// matching</b>, the catch never ran, and the count threw instead of returning <c>0</c> — TASK-285
+        /// reopened from outside the framework, by a host doing nothing worse than escalating.</item>
+        /// </list>
+        /// <para>
+        /// ⚠ <b>Per subscriber, not one <c>try</c> around the multicast.</b> A plain
+        /// <c>handler?.Invoke(x)</c> stops at the first delegate that throws, so a host with a logger and a
+        /// metric loses the metric to a bug in the logger — a silent drop of exactly the kind this channel
+        /// exists to prevent. <see cref="Delegate.GetInvocationList"/> isolates them.
+        /// </para>
+        /// <para>
+        /// ⚠ <b>Swallowed here means RECORDED, not discarded</b> — see <see cref="SubscriberFailures"/>.
+        /// A channel that hid a handler's own defect would be the same failure one level up.
+        /// </para>
+        /// <para>
+        /// ⚠ <b>Callers must complete their bookkeeping BEFORE calling this.</b> That ordering is what kept
+        /// TASK-288's healing alive when a subscriber threw, and it was luck rather than design until this
+        /// method existed. It has a test.
+        /// </para>
+        /// <para>
+        /// <b>Not yet used by <c>OnIndexCreationFailed</c></b>, deliberately. That channel is consumed in
+        /// production by Symbio, so changing whether a handler's exception propagates is a behaviour change
+        /// on consumed surface and needs its own measurement first — [[TASK-283]] owns it, and this method
+        /// is the candidate answer for it to adopt rather than a second policy to live beside it.
+        /// </para>
+        /// </remarks>
+        /// <param name="handler">The event's backing delegate, possibly null.</param>
+        /// <param name="payload">What each subscriber receives.</param>
+        /// <param name="channel">The event's name, recorded against any failure.</param>
+        protected void RaiseDiagnostic<T>(Action<T>? handler, T payload, string channel)
+        {
+            if (handler == null)
+            {
+                return;
+            }
+
+            foreach (var subscriber in handler.GetInvocationList())
+            {
+                try
+                {
+                    ((Action<T>)subscriber)(payload);
+                }
+                catch (Exception ex)
+                {
+                    _subscriberFailures.Record(channel + " " + ex.GetType().FullName,
+                        new SubscriberFailure(channel, ex));
+                }
+            }
+        }
+
         protected void RecordSchemaEscape(Exception ex, IEnumerable<string>? tableNames)
         {
             var annotation = FindAnomalousAnnotation(ex);
@@ -305,7 +427,13 @@ namespace Birko.Data.SQL.Connectors
             var escape = new SchemaEscape(names, annotation, ex);
             if (_schemaEscapes.Record(string.Join("\u0000", names), escape))
             {
-                OnSchemaEscapeDetected?.Invoke(escape);
+                // TASK-289 — via RaiseDiagnostic, never a bare Invoke: this runs inside
+                // EnsureSchemaAndReport between building the annotated exception and throwing it, so a
+                // handler that threw used to REPLACE that exception -- destroying TASK-286's annotation
+                // and, because the replacement no longer matched SelectCount's
+                // `when (IsMissingTableExceptionChain(ex))` filter, making the count throw instead of
+                // returning 0. Everything above this line is bookkeeping that must already be done.
+                RaiseDiagnostic(OnSchemaEscapeDetected, escape, nameof(OnSchemaEscapeDetected));
             }
         }
 
