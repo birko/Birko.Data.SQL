@@ -82,7 +82,64 @@ namespace Birko.Data.SQL.Connectors
             }
         }
 
-        public virtual void CreateTable(string name, IEnumerable<string> fields)
+        /// <summary>
+        /// Creates one table and records that it was created. <b>Not virtual</b> — override
+        /// <see cref="CreateTableCore"/> to change the statement.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// ⚠ <b>TASK-295 — this used to be the virtual method AND the one place
+        /// <see cref="AbstractConnector.RecordTableCreated"/> was called, which meant it recorded on
+        /// exactly the providers that did not override it.</b> PostgreSQL, MySQL, SQL Server and
+        /// TimescaleDB all did, so <c>TablesCreated</c> was permanently <b>empty</b> on four of five
+        /// connectors — measured live — and with it TASK-286's annotation (always "NO recorded CREATE
+        /// TABLE"), TASK-287's <c>SchemaEscapes</c> channel and TASK-288's healing. A table that vanished
+        /// beneath an initialised store therefore never healed there, and every write threw until the
+        /// process restarted: the consumer-reported outage TASK-288 closed, still open on every provider
+        /// but SQLite.
+        /// </para>
+        /// <para>
+        /// TASK-286's comment claimed "every CreateTable overload funnels here, which is why this is the
+        /// one place it needs to go". The overloads did; the <i>providers</i> did not. Fifth instance of
+        /// § TASK-243's <i>"a funnel with four overrides is not a funnel"</i>.
+        /// </para>
+        /// <para>
+        /// <b>Why the template method rather than a call in each override.</b> Adding
+        /// <c>RecordTableCreated</c> to the four overrides is a fourth, fifth and sixth copy of the rule
+        /// and re-arms this defect for the next provider — which is how this repo already has five
+        /// instances of it. Here the recording cannot be bypassed: an override changes the statement and
+        /// never sees this wrapper. It also keeps the one <b>external</b> direct caller
+        /// (<c>Birko.Data.Migrations.SQL.SqlSchemaBuilder</c>) recorded, which placing the call in the
+        /// <c>IDictionary</c> dispatcher would have silently dropped.
+        /// </para>
+        /// <para>
+        /// Blast radius measured before the signature changed: <b>0</b> overrides of this method and
+        /// <b>0</b> subclasses of any Birko connector across all 16 consumer repos, so making it
+        /// non-virtual breaks nothing. Had there been any, the break would at least be loud (<c>CS0506</c>)
+        /// rather than a silently orphaned override — § TASK-278's hazard, in the direction that reports
+        /// itself.
+        /// </para>
+        /// </remarks>
+        public void CreateTable(string name, IEnumerable<string> fields)
+        {
+            CreateTableCore(name, fields);
+
+            // TASK-286 — recorded AFTER the statement returns, so a create that threw is not recorded.
+            //
+            // ⚠ It does NOT mean the table exists now: a create inside a caller's transaction boundary is
+            // undone by a rollback and stays recorded (measured in Symbio — the rolled-back cart create
+            // left no Carts table). That is deliberate, because the question it answers is "was this ever
+            // created, and when", which is precisely what cannot be reconstructed after the fact.
+            RecordTableCreated(name);
+        }
+
+        /// <summary>
+        /// Emits the <c>CREATE TABLE</c> statement. Providers override <b>this</b>, not
+        /// <see cref="CreateTable(string, IEnumerable{string})"/>, matching the framework's own
+        /// <c>*Core</c> convention — the public wrapper owns the bookkeeping the override must not be able
+        /// to skip.
+        /// </summary>
+        protected virtual void CreateTableCore(string name, IEnumerable<string> fields)
         {
             DoDdlCommand((command) =>
             {
@@ -95,16 +152,6 @@ namespace Birko.Data.SQL.Connectors
             {
                 command.ExecuteNonQuery();
             }, true);
-
-            // TASK-286 — diagnostic only. Recorded AFTER the statement returns, so a create that threw is
-            // not recorded. Every CreateTable overload funnels here, which is why this is the one place it
-            // needs to go.
-            //
-            // ⚠ It does NOT mean the table exists now: a create inside a caller's transaction boundary is
-            // undone by a rollback and stays recorded (measured in Symbio — the rolled-back cart create
-            // left no Carts table). That is deliberate, because the question it answers is "was this ever
-            // created, and when", which is precisely what cannot be reconstructed after the fact.
-            RecordTableCreated(name);
         }
 
         /// <param name="throwIfExists">
