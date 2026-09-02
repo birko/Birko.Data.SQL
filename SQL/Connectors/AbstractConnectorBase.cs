@@ -144,6 +144,118 @@ namespace Birko.Data.SQL.Connectors
         }
 
         /// <summary>
+        /// The name of the table <paramref name="ex"/> says is missing, or null when this provider's
+        /// wording cannot be parsed.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// TASK-293. <c>AbstractConnector</c> decides whether an escape is <b>the anomaly</b> — a table
+        /// this connector created being reported missing — and before this it asked the question of the
+        /// <i>statement</i>: does any recorded table name occur as a substring of the SQL? That is the
+        /// wrong question twice over, and both were measured:
+        /// </para>
+        /// <list type="bullet">
+        /// <item>a recorded <c>Movement</c> makes a first touch of <c>StockMovements</c> read as the
+        /// anomaly, because the shorter name sits inside the longer one;</item>
+        /// <item>with no name collision at all, a statement naming two tables — one created, one not —
+        /// reads as the anomaly on the strength of the created one, which is simply the shape a view or a
+        /// multi-type count produces.</item>
+        /// </list>
+        /// <para>
+        /// The provider's own error names the table that is actually missing, and names only that one, so
+        /// the discriminator can be exact. Measured on SQLite:
+        /// <c>SELECT count(*) FROM "Ledger", "StockMovements"</c> raises
+        /// <c>no such table: StockMovements</c> — the missing one, and <b>not</b> <c>Ledger</c>.
+        /// </para>
+        /// <para>
+        /// ⚠ <b>Extract around the QUOTES, not around the English.</b> PostgreSQL and MySQL localise the
+        /// prose in these messages but never the identifier, so a phrase-anchored parse would silently
+        /// stop matching on a server whose <c>lc_messages</c> is not English — and a silent non-match here
+        /// disables TASK-288's healing rather than announcing anything. Same reasoning
+        /// <see cref="IsMissingTableException"/> records for keying PostgreSQL on the SQLSTATE.
+        /// </para>
+        /// <para>
+        /// The base implementation is SQLite's wording, matching <see cref="IsMissingTableException"/>.
+        /// </para>
+        /// </remarks>
+        public virtual string? MissingTableName(Exception ex)
+        {
+            // SQLite: "SQLite Error 1: 'no such table: Widgets'." and, for an explicit database prefix,
+            // "no such table: main.Widgets".
+            const string marker = "no such table:";
+            var at = ex.Message?.IndexOf(marker, StringComparison.OrdinalIgnoreCase) ?? -1;
+            return at < 0 ? null : TrimTableName(ex.Message!.Substring(at + marker.Length));
+        }
+
+        /// <summary>
+        /// <see cref="MissingTableName"/> applied to an exception <b>and every inner exception</b> — the
+        /// shape <see cref="IsMissingTableExceptionChain"/> already has, and for the same reason:
+        /// <c>InitException</c> rewraps, so the provider's own message is not the outermost one.
+        /// </summary>
+        public string? MissingTableNameChain(Exception? ex)
+        {
+            for (var current = ex; current != null; current = current.InnerException)
+            {
+                var name = MissingTableName(current);
+                if (!string.IsNullOrEmpty(name))
+                {
+                    return name;
+                }
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Cleans one extracted identifier: strips the trailing punctuation each provider's wording adds,
+        /// any quoting, and a schema or database qualifier.
+        /// </summary>
+        /// <remarks>
+        /// The qualifier goes because <c>AbstractConnector.TablesCreated</c> is keyed by the bare
+        /// <c>Table.Name</c> the framework created, never by a qualified one — so keeping
+        /// <c>mydb.Widgets</c> would fail to match the very entry it is looking for.
+        /// </remarks>
+        protected static string? TrimTableName(string? raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                return null;
+            }
+            var name = raw.Trim().TrimEnd('.', '\'', '"', ')', ';', ',');
+            name = name.Trim().Trim('\'', '"', '`', '[', ']');
+            var dot = name.LastIndexOf('.');
+            if (dot >= 0 && dot < name.Length - 1)
+            {
+                name = name.Substring(dot + 1);
+            }
+            name = name.Trim().Trim('\'', '"', '`', '[', ']');
+            return string.IsNullOrWhiteSpace(name) ? null : name;
+        }
+
+        /// <summary>
+        /// The first single- or double-quoted token in <paramref name="message"/>, cleaned — the shape
+        /// PostgreSQL (<c>relation "x" does not exist</c>), MySQL (<c>Table 'db.x' doesn't exist</c>) and
+        /// SQL Server (<c>Invalid object name 'dbo.X'.</c>) all use.
+        /// </summary>
+        protected static string? FirstQuotedToken(string? message)
+        {
+            if (string.IsNullOrEmpty(message))
+            {
+                return null;
+            }
+            foreach (var quote in new[] { '"', '\'' })
+            {
+                var open = message!.IndexOf(quote);
+                if (open < 0) continue;
+                var close = message.IndexOf(quote, open + 1);
+                if (close > open + 1)
+                {
+                    return TrimTableName(message.Substring(open + 1, close - open - 1));
+                }
+            }
+            return null;
+        }
+
+        /// <summary>
         /// Executes an action with retry logic for transient failures.
         /// </summary>
         protected void ExecuteWithRetry(Action action, string? commandText = null)

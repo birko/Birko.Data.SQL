@@ -588,7 +588,10 @@ namespace Birko.Data.SQL.Connectors
             // One detection point for the whole framework. Both the record and the generation bump hang off
             // it, and so does the annotation, so the three cannot disagree about which case is the anomaly.
             var reported = new Exception(DescribeSchemaEscape(ex, commandText), ex);
-            RecordSchemaEscape(reported, CreatedTablesNamedIn(commandText).Select(kvp => kvp.Key));
+            // TASK-293 — `ex`, not `reported`: the provider's own message names the missing table, and
+            // MissingTableNameChain walks the chain to reach it either way. Passing the original keeps the
+            // record and the annotation asking the same question of the same exception.
+            RecordSchemaEscape(reported, CreatedTablesNamedIn(commandText, ex).Select(kvp => kvp.Key));
             throw reported;
         }
 
@@ -632,11 +635,36 @@ namespace Birko.Data.SQL.Connectors
         /// case is the anomaly.
         /// </para>
         /// </remarks>
-        private List<KeyValuePair<string, DateTimeOffset>> CreatedTablesNamedIn(string? commandText)
+        private List<KeyValuePair<string, DateTimeOffset>> CreatedTablesNamedIn(string? commandText, Exception? ex)
         {
+            var empty = new List<KeyValuePair<string, DateTimeOffset>>();
+
+            // TASK-293 — the exact answer first: the provider's error names the table that is actually
+            // missing, and names only that one, so ask about THAT table rather than about the statement.
+            // Both false-positive channels this closes were measured, and neither needed anything exotic:
+            // a recorded `Movement` made a first touch of `StockMovements` read as the anomaly, and a
+            // statement naming two tables (one created, one not) read as the anomaly on the strength of
+            // the created one — the ordinary shape of a view or a multi-type count. A false anomaly is not
+            // a stray log line since TASK-288: it bumps SchemaGeneration and so invalidates the remembered
+            // initialization of EVERY store on this connector.
+            var missing = MissingTableNameChain(ex);
+            if (!string.IsNullOrEmpty(missing))
+            {
+                return _tablesCreated.TryGetValue(missing!, out var when)
+                    ? new List<KeyValuePair<string, DateTimeOffset>> { new(missing!, when) }
+                    : empty;
+            }
+
+            // The fallback, reached only when this provider's wording could not be parsed at all. It is
+            // kept rather than answering "not the anomaly", because a silent non-match here would disable
+            // TASK-288's healing — a store whose table really did vanish would stay broken for the life of
+            // the process, which is the defect that task exists to remove, and it would do so without
+            // announcing anything. Erring toward re-running is the asymmetry
+            // AbstractStore.CanRememberInitialization already records. It carries the substring
+            // imprecision above, deliberately and only here; it has its own test.
             if (string.IsNullOrEmpty(commandText))
             {
-                return new List<KeyValuePair<string, DateTimeOffset>>();
+                return empty;
             }
             return _tablesCreated
                 .Where(kvp => commandText!.Contains(kvp.Key, StringComparison.OrdinalIgnoreCase))
@@ -651,7 +679,7 @@ namespace Birko.Data.SQL.Connectors
                 return commandText;
             }
 
-            var created = CreatedTablesNamedIn(commandText);
+            var created = CreatedTablesNamedIn(commandText, ex);
 
             if (created.Count == 0)
             {
