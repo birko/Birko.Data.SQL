@@ -154,7 +154,18 @@ namespace Birko.Data.SQL.Stores
             // TASK-288 — pin the generation this schema-ensure corresponds to. After CreateTable, so an
             // escape seen while it ran (and therefore already addressed by it) does not read as staleness.
             _initSchemaGeneration = Connector.SchemaGeneration;
+
+            // TASK-290 — ask about durability HERE, while the scope this method entered is still
+            // published. See CanRememberInitialization for what went wrong when the base asked it later.
+            _initDdlSurvivedRollback = Connector.DdlSurvivesRollback;
         }
+
+        // TASK-290 — whether the DDL of the schema-ensure that just ran was durable, recorded at the one
+        // moment the question can be answered correctly.
+        //
+        // Defaults to true so a store that never enters a boundary — the overwhelming majority — remembers
+        // its initialization exactly as before and pays nothing.
+        private bool _initDdlSurvivedRollback = true;
 
         /// <summary>
         /// A schema-ensure that ran inside a caller's transaction boundary is not remembered, because a
@@ -169,8 +180,31 @@ namespace Birko.Data.SQL.Stores
         /// that is not there — reproduced in
         /// <c>Birko.Data.SQL.SqLite.Tests.SchemaEnsureRollbackResidueTests</c>.
         /// </remarks>
+        /// <remarks>
+        /// ⚠ <b>TASK-290 — it reads a value captured inside <see cref="InitCoreAsync"/>, and asking the
+        /// connector here instead is how this held on one door and not the other.</b> The base evaluates
+        /// this <i>after</i> <c>InitCoreAsync</c> has returned, and <c>InitCoreAsync</c> publishes the
+        /// per-store transaction context with <c>using var _tx = EnterTransactionScope()</c> — so that
+        /// scope is already disposed by the time the base asks. <c>DdlSurvivesRollback</c> then answered
+        /// <c>true</c> on the strength of <c>AmbientTransaction == null</c>, and the store remembered an
+        /// initialization sitting in a caller's uncommitted transaction. The ambient door
+        /// (<c>SqlUnitOfWork</c>) was unaffected only because the caller holds its scope across the whole
+        /// operation — precisely the asymmetry TASK-244's own acceptance asked to remove.
+        /// <para>
+        /// Measured on SQLite with <b>no concurrency at all</b>: through the per-store door a rolled-back
+        /// schema-ensure left the table absent and the store initialised, so the next count answered
+        /// <c>0</c> with an <b>anomalous</b> schema escape recorded and the next write threw — the exact
+        /// signature TASK-290 exists to explain, manufactured on a legitimate path.
+        /// </para>
+        /// <para>
+        /// <b>Not SQLite-specific.</b> The condition is
+        /// <c>AmbientTransaction != null &amp;&amp; SupportsTransactionalDdl</c>, which also holds on
+        /// PostgreSQL and SQL Server; MySQL is exempt only because its DDL commits itself (TASK-243), and
+        /// the captured value says so there too.
+        /// </para>
+        /// </remarks>
         protected override bool CanRememberInitialization
-            => Connector == null || Connector.DdlSurvivesRollback;
+            => Connector == null || _initDdlSurvivedRollback;
 
         // TASK-288 — the connector's SchemaGeneration as it stood when this store last schema-ensured.
         //

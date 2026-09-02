@@ -122,14 +122,27 @@ namespace Birko.Data.SQL.Stores
             Connector?.DoInit();
             // TASK-288 — see the async twin. After CreateTable, deliberately.
             _initSchemaGeneration = Connector?.SchemaGeneration ?? 0;
+
+            // TASK-290 — durability is asked HERE, while the scope this method entered is still published;
+            // the base asks CanRememberInitialization after this method returns, i.e. after `using var _tx`
+            // has already restored the ambient. See the async twin.
+            //
+            // ⚠ This store is the WORSE half of that defect, because SqlUnitOfWork.FromStore takes an
+            // AsyncDataBaseStore — so SetTransactionContext is the only transaction door a sync store has,
+            // and it was the door that did not work. There was no unaffected path here to compare against.
+            _initDdlSurvivedRollback = Connector?.DdlSurvivesRollback ?? true;
         }
+
+        // TASK-290 — see the async twin. Defaults to true so a store that never enters a boundary behaves
+        // exactly as before.
+        private bool _initDdlSurvivedRollback = true;
 
         /// <summary>
         /// A schema-ensure that ran inside a caller's transaction boundary is not remembered (TASK-244) —
         /// see the async twin.
         /// </summary>
         protected override bool CanRememberInitialization
-            => Connector == null || Connector.DdlSurvivesRollback;
+            => Connector == null || _initDdlSurvivedRollback;
 
         // TASK-288 — the connector's SchemaGeneration as it stood when this store last schema-ensured.
         //
