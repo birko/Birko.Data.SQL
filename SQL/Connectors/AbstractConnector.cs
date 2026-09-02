@@ -578,15 +578,66 @@ namespace Birko.Data.SQL.Connectors
         /// keeps its stated callers (lazy create-on-first-use, view-existence probing, CR-M149).
         /// </para>
         /// </remarks>
+        /// <summary>
+        /// The key under which <see cref="Exception.Data"/> carries the statement that failed, on an
+        /// exception whose type is preserved.
+        /// </summary>
+        /// <remarks>
+        /// TASK-291/294. For a non-missing-table failure the old rewrap contributed exactly two things:
+        /// the command text, and the loss of the exception's type. This keeps the first without the
+        /// second — a host still learns which statement failed, and still gets a
+        /// <c>SqliteException</c> / <c>PostgresException</c> / <c>OperationCanceledException</c> it can
+        /// act on.
+        /// </remarks>
+        public const string CommandTextDataKey = "Birko.CommandText";
+
         protected void EnsureSchemaAndReport(Exception ex, string? commandText)
         {
-            if (!IsInitializing && IsMissingTableException(ex))
+            if (!IsMissingTableException(ex))
+            {
+                // TASK-291 + TASK-294 — REPORT IT AS ITSELF. This funnel is reached for EVERY exception
+                // from every provider's OnException handler, and rewrapping them all as a bare Exception
+                // destroyed the one thing three separate mechanisms select on:
+                //
+                //   * ExecuteWithRetry filters on IsTransientException(ex) — the DIRECT predicate, not a
+                //     chain walk — so a rewrapped SQLITE_BUSY stopped being transient and the RetryPolicy
+                //     a consumer configured silently never fired;
+                //   * a cancellation from a client that hung up arrived as a bare Exception, so a host
+                //     could no longer tell an abort from a fault and it surfaced as a 500 (observed six
+                //     times under consumer Symbio's own 20 s abort);
+                //   * anything a host catches by type. That is § TASK-289's lesson in reverse: an
+                //     exception filter is a silent coupling, and replacing an exception in flight
+                //     switches one off from a distance with no diagnostic.
+                //
+                // DescribeSchemaEscape already returns commandText unchanged for these, so the rewrap was
+                // contributing the SQL text and nothing else — carried here on Data instead.
+                //
+                // ⚠ Nothing is RECORDED on this branch, and that is not an omission: SchemaEscapes and
+                // SchemaGeneration are gated on TASK-286's annotation, which only a missing-table failure
+                // can carry. A cancellation is not a schema anomaly.
+                if (!string.IsNullOrEmpty(commandText))
+                {
+                    // Best effort: a few exception types use a read-only or fixed Data dictionary.
+                    try { ex.Data[CommandTextDataKey] = commandText; } catch { }
+                }
+                // Capture-and-throw rather than `throw ex`, which would reset the stack trace to here and
+                // lose where the statement actually failed.
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex).Throw();
+            }
+
+            if (!IsInitializing)
             {
                 DoInit();
             }
 
             // One detection point for the whole framework. Both the record and the generation bump hang off
             // it, and so does the annotation, so the three cannot disagree about which case is the anomaly.
+            //
+            // ⚠ The rewrap stays HERE, deliberately. TASK-286's annotation rides on the exception message
+            // because consumer Symbio surfaces connector diagnostics through boot-time checks that cannot
+            // see a runtime event; TASK-277 needs this to throw so a write is never silently discarded;
+            // TASK-285's count catch selects on IsMissingTableExceptionChain, which walks to the inner.
+            // This is the one shape where the rewrap earns what it costs.
             var reported = new Exception(DescribeSchemaEscape(ex, commandText), ex);
             // TASK-293 — `ex`, not `reported`: the provider's own message names the missing table, and
             // MissingTableNameChain walks the chain to reach it either way. Passing the original keeps the
