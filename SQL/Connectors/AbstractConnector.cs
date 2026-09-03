@@ -200,15 +200,20 @@ namespace Birko.Data.SQL.Connectors
             // every HTTP request for a per-request store over an unbuildable index.
             if (_indexCreationFailures.Record(IndexFailureKey(tableName, indexName), failure))
             {
-                // ⚠ A BARE Invoke, and deliberately still so — TASK-283 owns this one. A throwing
-                // subscriber here propagates out of schema-ensure and bricks the entity, which is the
-                // same hole TASK-289 closed on OnSchemaEscapeDetected with RaiseDiagnostic. It is NOT
-                // changed here because this channel is consumed in Symbio production code, its host, two
-                // test files and its specs, so changing whether a handler exception propagates is a
-                // behaviour change on consumed surface and needs TASK-283 own measurement first.
-                // When that measurement is done, adopt RaiseDiagnostic rather than writing a second
-                // policy beside it.
-                OnIndexCreationFailed?.Invoke(failure);
+                // TASK-283 — via RaiseDiagnostic, never a bare Invoke. This runs INSIDE the catch that
+                // implements TASK-204's degrade, and a store sets _initialized only after schema-ensure
+                // returns — so a subscriber that threw propagated out and left the entity's whole
+                // surface, READS INCLUDED, throwing on every later operation. Exactly the failure
+                // TASK-204 exists to remove, reintroduced through the channel that reports it, and the
+                // trigger is ordinary: the event's own summary invites a host to "log or escalate".
+                //
+                // TASK-254 left this bare on the grounds that the channel had real consumers, so
+                // changing whether a handler exception propagates would be a behaviour change on
+                // consumed surface. Re-measured at TASK-283 across all 16 consumer repos: ZERO
+                // subscriptions to this event — the "consumers" were doc comments, one of them
+                // (Symbio Program.cs) explaining why it does NOT read the channel. The collection
+                // IndexCreationFailures does have one real reader and is untouched.
+                RaiseDiagnostic(OnIndexCreationFailed, failure, nameof(OnIndexCreationFailed));
             }
         }
 
