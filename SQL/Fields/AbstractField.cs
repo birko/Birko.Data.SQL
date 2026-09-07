@@ -395,7 +395,11 @@ namespace Birko.Data.SQL.Fields
             }
             if (property.PropertyType == typeof(byte[]))
             {
-                var binaryField = new BinaryField(property, name, primary, unique);
+                // TASK-266: maxLength reaches a byte[] column now. Same MaxLength-then-Precision fallback
+                // as the string arm below, so one rule covers both reference-typed widths.
+                var binaryLength = (maxLength != null && maxLength > 0) ? maxLength : precision;
+                var binaryField = new BinaryField(property, name, primary, unique,
+                    (binaryLength != null && binaryLength > 0) ? binaryLength : null);
                 if (required)
                 {
                     binaryField.IsNotNull = true;
