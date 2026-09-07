@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.Common;
@@ -18,7 +18,54 @@ namespace Birko.Data.SQL.Connectors
     {
         protected readonly PasswordSettings _settings = null!;
         protected readonly object _lock = new();
-        public bool IsInitializing { get; protected set; } = false;
+        /// <summary>
+        /// Whether <c>DoInit</c> is running <b>on this call flow</b>.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// TASK-270. This was <c>{ get; protected set; }</c> — a plain mutable flag on an object
+        /// <see cref="DataBase.GetConnector"/> caches <b>process-wide</b> per (type, settings id), which
+        /// made it the fourth instance of the pattern that task exists to close, and the worst-behaved:
+        /// re-entrancy is a property of <i>one call flow</i>, and this published it to every concurrent
+        /// caller of the same database.
+        /// </para>
+        /// <para>
+        /// ⚠ <b>The failure was a silent skip, not a race on a bit.</b> <c>DoInit</c> reads the flag and
+        /// returns when it is set, so while thread A was inside its <c>OnInit</c> handlers, thread B
+        /// calling <c>DoInit()</c> had its initialisation <b>discarded</b> — not deferred, not retried —
+        /// and carried on believing it had run. The unsynchronised check-then-set is the smaller half.
+        /// </para>
+        /// <para>
+        /// An <see cref="AsyncLocal{T}"/> per instance is flow-scoped <i>and</i> instance-scoped, so a
+        /// handler that re-enters this connector still short-circuits (which is what the guard is for)
+        /// while a different flow, or a different connector in the same flow, is unaffected. Same
+        /// reasoning and same mechanism as <c>AmbientSqlTransaction</c>, which TASK-240 introduced to move
+        /// the *transaction* off this same shared object.
+        /// </para>
+        /// <para>
+        /// The setter is gone rather than narrowed: measured at TASK-270, nothing outside
+        /// <c>AbstractConnector.DoInit</c> ever wrote it, and no consumer reads it.
+        /// </para>
+        /// </remarks>
+        public bool IsInitializing => _isInitializing.Value;
+
+        private readonly System.Threading.AsyncLocal<bool> _isInitializing = new();
+
+        /// <summary>
+        /// Marks the current call flow as initialising for the duration of the returned scope.
+        /// </summary>
+        protected IDisposable EnterInitializingScope()
+        {
+            _isInitializing.Value = true;
+            return new InitializingScope(this);
+        }
+
+        private sealed class InitializingScope : IDisposable
+        {
+            private readonly AbstractConnectorBase _owner;
+            public InitializingScope(AbstractConnectorBase owner) => _owner = owner;
+            public void Dispose() => _owner._isInitializing.Value = false;
+        }
 
         /// <summary>
         /// Gets the connection settings for this connector.

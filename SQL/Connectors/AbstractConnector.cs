@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.Common;
@@ -760,11 +760,22 @@ namespace Birko.Data.SQL.Connectors
 
         public void DoInit()
         {
-            if (!IsInitializing)
+            // TASK-270 -- the guard is per CALL FLOW, not per connector. See
+            // AbstractConnectorBase.IsInitializing: this object is cached process-wide per
+            // (type, settings id), so the old plain flag meant a concurrent caller's DoInit was silently
+            // DISCARDED while another flow was inside its OnInit handlers.
+            //
+            // The scope also restores the flag on an exception, which the old assignment pair did not:
+            // a throwing OnInit handler left IsInitializing stuck true for the life of the process,
+            // permanently suppressing DoInit for every caller of that database.
+            if (IsInitializing)
             {
-                IsInitializing = true;
+                return;
+            }
+
+            using (EnterInitializingScope())
+            {
                 OnInit?.Invoke(this);
-                IsInitializing = false;
             }
         }
 
