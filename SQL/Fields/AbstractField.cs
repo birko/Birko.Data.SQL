@@ -103,6 +103,34 @@ namespace Birko.Data.SQL.Fields
         /// </remarks>
         public bool UsesInlineUniqueConstraint => IsUnique && (IsNotNull || IsPrimary);
 
+        /// <summary>
+        /// Whether this field's <c>PRIMARY KEY</c> is rendered <b>inline on the column</b>, as opposed to a
+        /// table-level <c>PRIMARY KEY (a, b)</c> clause that names every key column at once.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// TASK-303. <c>FieldDefinition</c> rendered <c>PRIMARY KEY</c> per column from each field's flag,
+        /// so two primary fields emitted <b>two clauses</b> — which every provider rejects. Measured:
+        /// PostgreSQL 16 <c>42P16 multiple primary keys for table "T" are not allowed</c>, and SQLite
+        /// <c>Error 1: table has more than one primary key</c>. A composite key was therefore not merely
+        /// unsupported through the schema builder, it could not be declared at all.
+        /// </para>
+        /// <para>
+        /// <b>Why this one is computed from the TABLE where its <c>UsesInlineUniqueConstraint</c> sibling is
+        /// computed from the field.</b> Uniqueness is a property of a column on its own; being one of
+        /// several key columns is not — a field cannot know whether it is the only primary without asking
+        /// the table. <see cref="Table"/> is already on the field, so this needs no wiring at
+        /// <c>DataBase.LoadTable</c> and cannot fall out of step with the fields it describes.
+        /// </para>
+        /// <para>
+        /// A null <see cref="Table"/> keeps the inline form. That is the migrations path
+        /// (<c>SchemaField</c> is constructed with no table), where each field is rendered on its own and a
+        /// table-level clause has nothing to enumerate.
+        /// </para>
+        /// </remarks>
+        public bool UsesInlinePrimaryConstraint
+            => IsPrimary && (Table?.GetPrimaryFields()?.Count() ?? 1) <= 1;
+
 
         public bool IsAggregate { get; set; } = false;
         public System.Reflection.PropertyInfo Property { get; set; } = null!;

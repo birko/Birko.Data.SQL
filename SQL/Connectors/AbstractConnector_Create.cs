@@ -77,9 +77,63 @@ namespace Birko.Data.SQL.Connectors
             {
                 foreach (var kvp in tables.Where(x => x.Value != null && x.Value.Any()))
                 {
-                    CreateTable(kvp.Key, kvp.Value.Select(x => FieldDefinition(x)));
+                    CreateTable(kvp.Key, WithCompositePrimaryKey(kvp.Key, kvp.Value));
                 }
             }
+        }
+
+        /// <summary>
+        /// The column definitions for one table, plus a table-level <c>PRIMARY KEY (a, b)</c> clause when
+        /// more than one field is primary.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// TASK-303. <c>FieldDefinition</c> renders <c>PRIMARY KEY</c> inline from each field's flag, so
+        /// two primary fields emitted <b>two clauses</b> and every provider rejected the statement —
+        /// measured as PostgreSQL <c>42P16</c> and SQLite <c>"table has more than one primary key"</c>. A
+        /// composite key could therefore not be declared at all, which matters because TimescaleDB
+        /// <i>requires</i> one: <c>create_hypertable</c> on a Guid-keyed table answers
+        /// <c>cannot create a unique index without the column "ts" (used in partitioning)</c>, and its own
+        /// hint says to make the partitioning column "part of the primary or composite key".
+        /// </para>
+        /// <para>
+        /// The suppression lives on <see cref="Fields.AbstractField.UsesInlinePrimaryConstraint"/>, which
+        /// every provider's <c>FieldDefinition</c> consults, so the inline half and this clause cannot
+        /// disagree about which shape is in use.
+        /// </para>
+        /// <para>
+        /// ⚠ <b>Key order is declaration order</b> — <c>Table.Fields</c> preserves it — because a composite
+        /// key's column order decides which range scans the index can serve, so it must be the author's
+        /// rather than a dictionary's.
+        /// </para>
+        /// </remarks>
+        private IEnumerable<string> WithCompositePrimaryKey(string tableName, IEnumerable<Fields.AbstractField> fields)
+        {
+            var all = fields.ToList();
+            var primary = all.Where(x => x.IsPrimary).ToList();
+            var definitions = all.Select(x => FieldDefinition(x)).ToList();
+
+            if (primary.Count <= 1)
+            {
+                return definitions;
+            }
+
+            // SQLite's INTEGER PRIMARY KEY AUTOINCREMENT is a single-column form by construction: it is
+            // rejected alongside a table-level clause ("table has more than one primary key", measured).
+            // Refused here rather than emitted, because the alternative is a statement the server rejects
+            // with a message that says nothing about autoincrement.
+            var autoincrement = primary.FirstOrDefault(x => x.IsAutoincrement);
+            if (autoincrement != null)
+            {
+                throw new Exceptions.TableAttributeException(
+                    $"Table \"{tableName}\" declares a composite primary key that includes the "
+                  + $"auto-increment column \"{autoincrement.Name}\". An auto-increment column must be the "
+                  + "sole primary key. Drop the auto-increment, or make that column the only primary and "
+                  + "express the rest as a unique index.");
+            }
+
+            definitions.Add($"PRIMARY KEY ({string.Join(", ", primary.Select(x => x.Name))})");
+            return definitions;
         }
 
         /// <summary>
