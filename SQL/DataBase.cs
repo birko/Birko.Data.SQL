@@ -235,6 +235,24 @@ namespace Birko.Data.SQL
                     }
                     else
                     {
+                        // SH-H024 / TASK-308: only a parameter-FREE call can be folded to a constant. The
+                        // normalizer has already folded every such call, so a parameter-bound one arriving
+                        // here cannot be expressed as a SET value at all — and it must not be *invoked*.
+                        // Measured on SQLite before this guard: `SET Name = string.Concat(r.Name, "-",
+                        // r.Name)` reflectively invoked Concat with the parameter arguments evaluated to
+                        // null and stored the result, "-", with no exception and no log entry.
+                        if (ContainsParameter(callExpression))
+                        {
+                            throw new NotSupportedException(
+                                $"The value expression cannot be translated to SQL: "
+                                + $"{callExpression.Method.DeclaringType?.Name}.{callExpression.Method.Name} "
+                                + "is not one of the translated calls (Replace, ToLower, ToUpper) and it "
+                                + "references the entity, so it cannot be evaluated to a constant either. "
+                                + "Before this was refused it was invoked reflectively with the entity's "
+                                + "arguments evaluated to null and the result written to the column. "
+                                + "Compute the value in memory and pass it, or use a translated call.");
+                        }
+
                         var key = "@Const" + parameters.Count;
                         var value = EvaluateExpression(callExpression);
                         parameters.Add(key, value!);
@@ -340,6 +358,7 @@ namespace Birko.Data.SQL
         {
             if (expr != null)
             {
+                RequireTranslatableNode(expr);
                 if (expr is LambdaExpression lambdaExpression)
                 {
                     var type = lambdaExpression.Parameters?.FirstOrDefault()?.Type;
@@ -969,6 +988,73 @@ namespace Birko.Data.SQL
         }
 
         /// <summary>
+        /// The expression node kinds <see cref="ParseConditionExpression"/> has a branch for. Anything else
+        /// is <b>refused</b> rather than parsed into nothing.
+        /// </summary>
+        /// <remarks>
+        /// <para><b>SH-H021 + SH-H026 / TASK-308 — one root cause with two faces.</b>
+        /// <see cref="ParseConditionExpression"/> dispatches on lambda, unary, binary, method-call and
+        /// member nodes, in three independent <c>if</c> groups, and ends in
+        /// <c>return Array.Empty&lt;Condition&gt;()</c>. So a node kind none of them claims —
+        /// <see cref="TypeBinaryExpression"/> (<c>x.Payload is string</c>),
+        /// <see cref="InvocationExpression"/> (<c>x =&gt; pred(x)</c>), <see cref="NewExpression"/> —
+        /// produced <b>no conditions and no complaint</b>, which
+        /// <c>AbstractConnectorBase.AddWhere</c> renders as no <c>WHERE</c> at all: indistinguishable
+        /// from <c>_ =&gt; true</c>. Measured on SQLite, 3 rows: a top-level <c>x.Payload is string</c>
+        /// read <b>3 of 3 rows</b>, and as an <c>||</c> operand it made
+        /// <c>(x.Payload is string) || x.Amount == 10</c> read 3 of 3 too, because
+        /// <see cref="IsConstantBoolCondition"/> reads the untouched condition as constant
+        /// <c>true</c>. As an <c>&amp;&amp;</c> operand the term was silently dropped instead.</para>
+        /// <para><b>Why the guard is here and not in <see cref="IsConstantBoolCondition"/>.</b> That
+        /// predicate's <c>Values == null → true</c> branch has a <b>legitimate</b> reachability, measured:
+        /// <c>(x.A == 1 || true) &amp;&amp; x.B == 2</c> leaves exactly that state for its left operand and
+        /// <c>true</c> is the right answer there. "Nothing was parsed" is therefore overloaded, and the two
+        /// cases have to be told apart at the point the ambiguity is created — the unclaimed node — rather
+        /// than merged at the point it is read.</para>
+        /// <para><b>Why refuse rather than degrade.</b> § SH-H037: a mapper that cannot express something
+        /// refuses; it never drops it quietly. The opt-out exists and is the same one every other
+        /// backend offers — write a predicate the translator supports, or ask for every row explicitly
+        /// through <c>Read()</c> / <c>DeleteAll()</c>. <see cref="NotSupportedException"/> deliberately
+        /// matches what <c>ElasticSearch.ParseFilterQuery</c> throws for the same predicate (TASK-268), so
+        /// one <c>catch</c> selects an untranslatable filter on either backend.</para>
+        /// <para><b>The destructive half was already covered and this does not replace it.</b> Measured:
+        /// <c>DeleteAsync</c> on both shapes already threw <c>WholeTableWriteException</c> from
+        /// SH-H002's <c>AddRequiredWhere</c>, leaving 3 of 3 rows. This closes the <i>read</i>-path wrong
+        /// answer those tasks left open — and it now fires earlier, so the refusal names the predicate
+        /// rather than the table.</para>
+        /// </remarks>
+        /// <remarks>
+        /// <c>ConstantExpression</c> and <c>ParameterExpression</c> are on the list <b>permissively</b>:
+        /// neither is known to reach here (a constant operand is resolved by <c>TryGetLiteralBool</c>
+        /// first, and the lambda branch handles a constant body), but the list errs toward accepting,
+        /// because a false refusal breaks working code and is worse than the hole — the asymmetry
+        /// <c>PredicateScope</c> records. Adding a kind here is safe; removing one is not.
+        /// </remarks>
+        private static void RequireTranslatableNode(Expression expr)
+        {
+            if (expr is LambdaExpression
+                || expr is UnaryExpression
+                || expr is BinaryExpression
+                || expr is MethodCallExpression
+                || expr is MemberExpression
+                || expr is ConstantExpression
+                || expr is ParameterExpression)
+            {
+                return;
+            }
+
+            // ⚠ The node's TYPE only — never expr.ToString(). A rendered expression tree interpolates the
+            // values a closure captured, and this message travels into logs and error responses. Same
+            // reasoning as the identifier family's refusals: the diagnosis needs the shape, not the data.
+            throw new NotSupportedException(
+                $"The filter cannot be translated to SQL: it contains a {expr.NodeType} node "
+                + $"({expr.GetType().Name}) that the condition parser has no rule for. "
+                + "Before this was refused it produced no WHERE clause, which reads as every row. "
+                + "Rewrite the predicate using comparisons, boolean operators, member access and the "
+                + "supported method calls, or ask for every row explicitly with Read() / DeleteAll().");
+        }
+
+        /// <summary>
         /// Checks whether a parsed condition represents a bare constant boolean
         /// (Name is null/empty, single boolean value, default Equal type).
         /// Produced when the expression tree contains a literal true/false operand
@@ -1015,6 +1101,25 @@ namespace Birko.Data.SQL
         /// Unwraps a single surviving subcondition when the other operand of AND/OR was a constant.
         /// Transfers its content to the parent if present, or returns it standalone.
         /// </summary>
+        /// <remarks>
+        /// <para><b>SH-H022 / TASK-308 — the parent's <c>IsNot</c> is COMBINED, not assigned.</b> The
+        /// <c>Not</c> branch toggles <c>IsNot</c> on the very object it hands down as
+        /// <paramref name="parent"/>, so an assignment here silently discards an enclosing negation.
+        /// Measured on SQLite before the fix: <c>x =&gt; !(x.Amount == 10 &amp;&amp; trueFlag)</c> rendered
+        /// <c>WHERE Amount = @p</c> where the control <c>x =&gt; !(x.Amount == 10)</c> rendered
+        /// <c>WHERE NOT (Amount = @p)</c> — so the read returned <b>1 row instead of 2</b>, the exact
+        /// complement, and <c>DeleteAsync</c> threw nothing and destroyed that complement. The clause is
+        /// non-empty, so SH-H002's <c>AddRequiredWhere</c> has nothing to refuse: this was the one finding
+        /// in its area whose destructive path was unguarded.</para>
+        /// <para>XOR rather than <c>||</c>: two negations cancel. <c>!(x.A != 1 &amp;&amp; true)</c> is
+        /// <c>x.A == 1</c>, and a surviving leaf that carries its own <c>IsNot</c> must not be negated
+        /// twice. Where <paramref name="parent"/> is a plain operand accumulator its <c>IsNot</c> is
+        /// <c>false</c> and the XOR is the identity, so nothing else changes.</para>
+        /// <para>⚠ The sibling flag was already known to have this shape — see the comment on the
+        /// <c>.Date</c> range branch, which nests rather than merging precisely because this method would
+        /// overwrite a nested <c>IsOr</c>. The <c>IsNot</c> half went unnoticed beside it, which is why the
+        /// fix is stated here rather than at the call sites.</para>
+        /// </remarks>
         private static IEnumerable<Conditions.Condition> ReturnSingleSubCondition(Conditions.Condition? parent, Conditions.Condition surviving, bool isOr)
         {
             if (parent != null)
@@ -1023,7 +1128,7 @@ namespace Birko.Data.SQL
                 parent.Name = surviving.Name;
                 parent.Values = surviving.Values;
                 parent.Type = surviving.Type;
-                parent.IsNot = surviving.IsNot;
+                parent.IsNot = parent.IsNot ^ surviving.IsNot;
                 parent.SubConditions = surviving.SubConditions;
                 return new[] { parent };
             }
@@ -1429,7 +1534,25 @@ namespace Birko.Data.SQL
             }
 
             // Method calls on evaluated objects (e.g., value.ToLowerInvariant(), list.Contains(x))
-            if (expr is MethodCallExpression mce)
+            //
+            // SH-H024 / TASK-308 — ⚠ DEFENSIVE, NOT WITNESSED, and saying so is the point.
+            //
+            // Gated on ContainsParameter because a lambda parameter evaluates to null here and
+            // Method.Invoke would then succeed with the WRONG arguments rather than fail. That is how
+            // SH-H024 stored `"-"` for `string.Concat(r.Name, "-", r.Name)`.
+            //
+            // Measured: removing this gate reds **0 of 1,236** tests across Birko.Data.SQL.Tests,
+            // Birko.Data.SQL.SqLite.Tests and Birko.Data.ElasticSearch.Tests, because ParseExpression's
+            // method-call branch now refuses a parameter-bound call before it ever gets here — that
+            // refusal is the load-bearing half and it has its own red-verified test.
+            //
+            // Kept anyway, and NOT because a test demands it: without it this method holds two
+            // contradictory contracts, since the compiled-lambda fallback below explicitly refuses a
+            // parameter-bound tree while this arm fabricated a value from one. There are 19 call sites,
+            // and the next one to reach a parameter-bound method call would inherit the defect rather
+            // than the guard. Do not delete it as dead weight — that inconsistency IS SH-H024's root
+            // cause, and the call-site refusal only closes the door that happens to exist today.
+            if (expr is MethodCallExpression mce && !ContainsParameter(mce))
             {
                 object? instance = mce.Object != null ? EvaluateExpression(mce.Object) : null;
                 var args = new object?[mce.Arguments.Count];
