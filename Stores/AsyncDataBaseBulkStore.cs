@@ -146,6 +146,13 @@ namespace Birko.Data.SQL.Stores
         {
             // SH-M023 — read-then-loop, invisible to the connector guard; see the sync overload.
             RequireFilter(filter, "update");
+            // TASK-329: and RequireFilter only covers NULL. A filter that is present but reduces to every
+            // row — the empty `NOT IN` of TASK-137 — passed straight through, and because this path emits
+            // a SELECT followed by per-row UPDATEs keyed on the primary key, the connector's whole-table
+            // guard never sees a conditionless statement either. Measured before the fix: 3 of 3 rows
+            // rewritten, thrown=NONE, while this same store's Delete(filter) and
+            // Update(filter, PropertyUpdate) both refused it at the connector.
+            RequireBoundedFilter(filter, "update");
             var items = (await ReadAsync(filter, null, null, null, ct)).ToList();
             foreach (var item in items)
             {
@@ -180,6 +187,28 @@ namespace Birko.Data.SQL.Stores
                 await AsyncConnector.DeleteAllAsync(typeof(T), ct);
             else
                 await Task.Run(() => Connector!.DeleteAll(typeof(T)), ct);
+        }
+
+        /// <summary>
+        /// TASK-329 — refuses a filter that <b>reduces</b> to every row on a destructive write.
+        /// </summary>
+        /// <remarks>
+        /// This store does not derive from <c>AbstractAsyncBulkStore</c> (it implements
+        /// <c>IAsyncBulkStore&lt;T&gt;</c> directly), so it did not inherit that class's guard and had
+        /// none of its own. Rather than a third copy of the rule, both hierarchies and this store now
+        /// call one producer — <c>BoundedFilterGuard</c> — and supply only the door name, which is the
+        /// part that genuinely differs: an async store has no <c>DeleteAll()</c>.
+        /// <para>
+        /// Only the <c>Action&lt;T&gt;</c> overload needs this. The <c>PropertyUpdate&lt;T&gt;</c> and
+        /// <c>Delete(filter)</c> overloads reach the connector, where SH-H002's <c>AddRequiredWhere</c>
+        /// already refuses the same shape — measured, so this is not an assumption.
+        /// </para>
+        /// </remarks>
+        private static void RequireBoundedFilter(Expression<Func<T, bool>>? filter, string operation)
+        {
+            Data.Expressions.BoundedFilterGuard.Require(
+                filter, operation, typeof(T).Name,
+                operation == "delete" ? "DeleteAllAsync()" : "UpdateAllAsync(updates)");
         }
 
         /// <summary>

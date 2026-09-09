@@ -105,6 +105,10 @@ namespace Birko.Data.SQL.Stores
             // SH-M023: read-then-loop, so no conditionless SQL is emitted and the connector guard cannot see
             // this path — but a null filter still means Read(null) = every row, then mutate every one.
             RequireFilter(filter, "update");
+            // TASK-329: that comment reasoned about NULL and stopped there. A filter that is present but
+            // reduces to every row got through, and this path emits no conditionless statement for the
+            // connector to refuse. Measured before the fix: 3 of 3 rows rewritten, thrown=NONE.
+            RequireBoundedFilter(filter, "update");
             var items = Read(filter, null, null, null).ToList();
             foreach (var item in items)
             {
@@ -138,6 +142,17 @@ namespace Birko.Data.SQL.Stores
             EnsureInitialized();
             using var _tx = EnterTransactionScope();
             Connector?.DeleteAll(typeof(T));
+        }
+
+        /// <summary>
+        /// TASK-329 — refuses a filter that <b>reduces</b> to every row on a destructive write. See the
+        /// async twin; the rule lives once in <c>BoundedFilterGuard</c> and only the door name differs.
+        /// </summary>
+        private static void RequireBoundedFilter(Expression<Func<T, bool>>? filter, string operation)
+        {
+            Data.Expressions.BoundedFilterGuard.Require(
+                filter, operation, typeof(T).Name,
+                operation == "delete" ? "DeleteAll()" : "UpdateAll(updates)");
         }
 
         /// <summary>
